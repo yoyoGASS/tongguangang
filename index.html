@@ -1153,6 +1153,109 @@ addEventListener('paste', e=>{
   }
 });
 
+/* ─── 從圖片取塗裝色 ─────────────────────────────────────────
+   使用者放了自己的公仔照，希望整個介面的顏色跟著那幾隻走。
+   每一科抽出該張圖的主色，當成那個船席的塗裝色。
+
+   抽色不能只取平均——平均會得到一坨爛泥。作法是先丟掉太黑、太白、
+   太灰的像素（背景與陰影都在那裡），剩下的按色相分桶，取最大那桶的中位數。
+
+   抽出來的顏色不能直接用：
+     · 色場上的字要 4.5:1 → 白字或深墨二選一，算過才知道
+     · 地面上的圖形（堆疊格、色條）要 3:1 → 原色多半不夠，得往深或淺推
+   兩個主題的地面色不同，所以換主題時要重算。 */
+function hexRGB(h){ h=String(h).replace('#',''); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+function rgbHex(r,g,b){ return '#'+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join(''); }
+function relLum(c){ const f=c.map(v=>{v/=255; return v<=.03928? v/12.92 : Math.pow((v+.055)/1.055,2.4);});
+  return .2126*f[0]+.7152*f[1]+.0722*f[2]; }
+function cRatio(a,b){ const l1=relLum(a), l2=relLum(b); return (Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05); }
+/* 坐在這個顏色上的字：白的與深墨的，挑對比高的那個 */
+function inkFor(hex){
+  const bg=hexRGB(hex), w=[255,255,255], d=[26,19,12];
+  return cRatio(w,bg) >= cRatio(d,bg) ? '#FFFFFF' : '#1A130C';
+}
+/* 把顏色往深或往淺推，直到對背景達到目標對比。推不到就回最接近的那個 */
+function fitContrast(hex, bgHex, target){
+  const bg=hexRGB(bgHex), base=hexRGB(hex);
+  if(cRatio(base,bg) >= target) return hex;
+  const darkBG = relLum(bg) < 0.4;              // 深色地面 → 顏色要變亮
+  let best=hex, bestR=cRatio(base,bg);
+  for(let i=1;i<=20;i++){
+    const t=i/20;
+    const c = darkBG
+      ? base.map(v => v + (255-v)*t)            // 往白推
+      : base.map(v => v * (1-t));               // 往黑推
+    const r = cRatio(c,bg);
+    if(r>bestR){ bestR=r; best=rgbHex(c[0],c[1],c[2]); }
+    if(r>=target) return rgbHex(c[0],c[1],c[2]);
+  }
+  return best;
+}
+/* 主色：丟掉太黑太白太灰的像素，按色相分桶，取最大那桶的中位數 */
+function dominantColor(src){
+  return new Promise(res=>{
+    const im=new Image();
+    im.onerror=()=>res(null);
+    im.onload=()=>{
+      try{
+        const N=56, cv=document.createElement('canvas'); cv.width=cv.height=N;
+        const cx=cv.getContext('2d',{willReadFrequently:true});
+        cx.drawImage(im,0,0,N,N);
+        const d=cx.getImageData(0,0,N,N).data, buckets={};
+        for(let i=0;i<d.length;i+=4){
+          if(d[i+3] < 200) continue;                       // 透明的是背景
+          const r=d[i], g=d[i+1], b=d[i+2];
+          const mx=Math.max(r,g,b), mn=Math.min(r,g,b);
+          const l=(mx+mn)/510;
+          if(l<0.13 || l>0.93) continue;                   // 太黑太白：陰影與反光
+          if(mx-mn < 26) continue;                         // 太灰：多半是背景
+          let h;
+          if(mx===r)      h=((g-b)/(mx-mn)+6)%6;
+          else if(mx===g) h=(b-r)/(mx-mn)+2;
+          else            h=(r-g)/(mx-mn)+4;
+          const k=Math.round(h*60/14);                     // 約 26 個色相桶
+          (buckets[k]=buckets[k]||[]).push([r,g,b]);
+        }
+        const all=Object.values(buckets).sort((a,b)=>b.length-a.length);
+        const best=all[0];
+        if(!best || best.length<10) return res(null);
+        const med=i=>{ const v=best.map(p=>p[i]).sort((a,b)=>a-b); return v[v.length>>1]; };
+        res(rgbHex(med(0),med(1),med(2)));
+      }catch(e){ res(null); }
+    };
+    im.src=src;
+  });
+}
+/* 換圖之後把主色算好存起來，不要每次開啟都重算 */
+async function refreshPicColor(key){
+  S.picColor = S.picColor || {};
+  if(!PICS[key]){ delete S.picColor[key]; save(); return null; }
+  const c = await dominantColor(picSrc(key));
+  if(c){ S.picColor[key]=c; save(); }
+  return c;
+}
+async function refreshAllPicColors(){
+  for(const s of SUBJECTS) await refreshPicColor(s.key);
+  applyPrefs();
+}
+/* 套用：沒有圖的科目就用內建塗裝色 */
+function applyPicPalette(){
+  const r=document.documentElement;
+  SUBJECTS.forEach(s=>{
+    ['','-on','-lit'].forEach(suf=>r.style.removeProperty('--'+s.key+suf));
+  });
+  if(S.palette!=='pic') return;
+  const cs=getComputedStyle(r);
+  const yard=(cs.getPropertyValue('--yard')||'#E4E1D9').trim();
+  SUBJECTS.forEach(s=>{
+    const base=(S.picColor||{})[s.key];
+    if(!base) return;                                    // 沒圖就維持內建色
+    r.style.setProperty('--'+s.key, base);
+    r.style.setProperty('--'+s.key+'-on', inkFor(base));
+    r.style.setProperty('--'+s.key+'-lit', fitContrast(base, yard, 3.2));
+  });
+}
+
 /* ─── 夥伴 ───────────────────────────────────────────────────
    第四版。前三版醜的原因是**加法做過頭**——接縫線、鋸齒牙、鼻子、嘴筒、
    高光五種細節擠在 50px 見方裡，變成一團雜訊，縮小後更糊。
@@ -1292,7 +1395,7 @@ const defaults = ()=>({
   day:'', dayCount:0, goal:20, streak:0, lastActive:'', rank:0,
   dayPass:0, dayHold:0, dayPend:0, best:0,
   leaveMonth:'', leaveLeft:2, exams:[], goalAuto:true, goalDone:'', usedLeave:'',
-  place:null, placeDone:null, layout:'', palette:'', picPlate:true, bkPics:true,
+  place:null, placeDone:null, layout:'', palette:'', picPlate:true, bkPics:true, picColor:{},
   figs:{}, boxes:0, goo:0, recover:0, clearedYard:false,
   boxQuotaDay:'', boxStreakStep:0, boxWhy:[], starPop:''
 });
@@ -3308,7 +3411,8 @@ function commitCrop(){
           + '先移除一兩張已放的圖，或換一張更小的。');
     return;
   }
-  CROP = null; SFX.done(); viewSettings();
+  CROP = null; SFX.done();
+  refreshPicColor(key).then(()=>{ applyPrefs(); viewSettings(); });
 }
 
 function drawCrop(){
@@ -3609,6 +3713,28 @@ function cloudCatchHash(){
   history.replaceState(null, '', location.origin + location.pathname + location.search);
   return true;
 }
+/* 用信裡的 6 位數驗證碼登入。比點連結好——手機不用在信箱與瀏覽器之間跳，
+   也不會被「連結在別的瀏覽器開啟」搞死。
+   前提：Supabase 的 Magic Link 信件範本要含 {{ .Token }}。 */
+async function cloudVerifyCode(email, code){
+  try{
+    const r = await fetch(cloudBase()+'/auth/v1/verify', {
+      method:'POST',
+      headers:{'apikey':CLOUD.key, 'Content-Type':'application/json'},
+      body: JSON.stringify({type:'email', email, token:String(code).trim()})
+    });
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok || !j.access_token){
+      return {err:'驗證失敗（'+r.status+'）。'+(j.msg||j.error_description||j.message||'確認碼有沒有打錯，或已經過期。')};
+    }
+    CLOUD.access = j.access_token;
+    CLOUD.refresh = j.refresh_token || CLOUD.refresh;
+    CLOUD.uid = (j.user && j.user.id) || CLOUD.uid;
+    CLOUD.email = (j.user && j.user.email) || email;
+    saveCloud();
+    return {ok:true};
+  }catch(e){ return {err:'連不上（'+(e&&e.message||e)+'）。'}; }
+}
 function cloudSignOut(){
   delete CLOUD.access; delete CLOUD.refresh; delete CLOUD.uid; delete CLOUD.email;
   saveCloud();
@@ -3687,8 +3813,14 @@ function viewCloud(){
         兩台裝置各做一次。</p>
       <div class="cl-form">
         <label>Email<input id="cl-mail" type="email" placeholder="you@example.com" value="${esc(CLOUD.email||'')}"></label>
-        <button class="btn" id="cl-send">${CL_BUSY?'寄送中…':'寄登入連結給我'}</button>
-      </div>`
+        <button class="btn" id="cl-send">${CL_BUSY?'寄送中…':'寄驗證碼給我'}</button>
+        <label>信裡的驗證碼<input id="cl-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+          placeholder="6 位數字" maxlength="10"></label>
+        <button class="btn-ghost btn" id="cl-verify">${CL_BUSY?'驗證中…':'用驗證碼登入'}</button>
+      </div>
+      <p class="cal-legend">信裡同時有驗證碼與連結，用哪個都行。手機建議打驗證碼，不用跳來跳去。<br>
+        收不到驗證碼只有連結的話，去 Supabase → Authentication → Emails →
+        Magic Link 範本裡加一行 <b>{{ .Token }}</b>。</p>`
     : `
       <div class="set-row"><span class="lab">已登入<span class="sub">${esc(CLOUD.email||CLOUD.uid)}</span></span>
         <button class="btn-ghost btn" id="cl-out" style="flex:none;min-height:38px;padding:0 14px;font-size:12.5px">登出</button></div>
@@ -3745,6 +3877,14 @@ function viewCloud(){
     const r = await cloudSendLink(m);
     CL_MSG = r.ok ? '信寄出去了，去收信點裡面的連結。連結會把你帶回這個網站並自動登入。' : r.err;
   }));
+  on('#cl-verify', ()=>clGuard(async ()=>{
+    const m=($('#cl-mail').value||'').trim(), c=($('#cl-code').value||'').trim();
+    if(!m){ CL_MSG='先填 email。'; return; }
+    if(!c){ CL_MSG='把信裡的驗證碼填進來。'; return; }
+    const r = await cloudVerifyCode(m, c);
+    if(r.err){ CL_MSG=r.err; SFX.hold(); return; }
+    SFX.done(); CL_MSG='登入成功。接下來按「合併」就能跟另一台接上。';
+  }));
   on('#cl-check', ()=>clGuard(async ()=>{
     CL_REMOTE = await cloudPull();
     CL_MSG = CL_REMOTE.err ? CL_REMOTE.err
@@ -3787,12 +3927,28 @@ function viewCloud(){
     const tf = (r.data.state&&r.data.state.figs)||{};
     S.figs = S.figs||{};
     for(const k in tf) S.figs[k] = Math.max(S.figs[k]||0, tf[k]||0);
+    // 圖片與外觀設定也要跟過來：這台沒有的就用雲端那份，本機已有的不動
+    if(r.data.pics){
+      let got=0;
+      for(const k in r.data.pics){
+        if(PICS[k]) continue;
+        const v=r.data.pics[k];
+        PICS[k]=(typeof v==='string')?{d:v,t:false}:v; got++;
+      }
+      if(got) savePics();
+    }
+    const ts=r.data.state||{};
+    if(ts.picColor) S.picColor = Object.assign({}, ts.picColor, S.picColor||{});
+    ['palette','picPlate','examDate','goal','goalAuto'].forEach(k=>{
+      if(ts[k]!==undefined && (S[k]===undefined || S[k]===defaults()[k])) S[k]=ts[k];
+    });
     S.goo   = Math.max(S.goo||0,   (r.data.state&&r.data.state.goo)||0);
     S.boxes = Math.max(S.boxes||0, (r.data.state&&r.data.state.boxes)||0);
     S.best  = Math.max(S.best||0,  (r.data.state&&r.data.state.best)||0);
     save();
     const up = await cloudPush();
     CL_REMOTE = await cloudPull();
+    applyPrefs();
     SFX.done();
     CL_MSG = '合併完成：新增 '+m.added+' 題、更新 '+m.updated+' 題，現在共 '
            + Object.keys(S.records).length + ' 櫃。' + (up.err ? '（但回傳雲端失敗：'+up.err+'）' : '已回傳雲端。');
@@ -3841,9 +3997,10 @@ function viewSettings(){
       <span class="seg" id="zoom">${[['小',.92],['標準',1],['大',1.12],['特大',1.26]].map(([l,v])=>`<button data-v="${v}" aria-pressed="${S.zoom==v}">${l}</button>`).join('')}</span></div>
     <div class="set-row"><span class="lab">場燈<span class="sub">跟隨系統，或自己決定。</span></span>
       <span class="seg" id="theme">${[['跟隨',''],['白天','light'],['夜班','dark']].map(([l,v])=>`<button data-v="${v}" aria-pressed="${S.theme===v}">${l}</button>`).join('')}</span></div>
-    <div class="set-row"><span class="lab">色票<span class="sub">碼頭是水泥與塗裝的工業色；糖果是粉嫩暖色系。
+    <div class="set-row"><span class="lab">色票<span class="sub">碼頭是水泥與塗裝的工業色；糖果是粉嫩暖色系；
+      「跟著我的圖」會抽出你放的那四張圖各自的主色，當成該科的塗裝色。
       跟白天／夜班是兩個獨立的軸，可以並存。</span></span>
-      <span class="seg" id="palette">${[['碼頭',''],['糖果','candy']]
+      <span class="seg" id="palette">${[['碼頭',''],['糖果','candy'],['跟著我的圖','pic']]
         .map(([l,v])=>`<button data-v="${v}" aria-pressed="${(S.palette||'')===v}">${l}</button>`).join('')}</span></div>
     <div class="set-row"><span class="lab">版面<span class="sub">電腦版是控制室：左邊船席與功能常駐、堆場現況隨時看得到。
       這頁嵌在別人的視窗裡看時寬度可能不夠，會自動退回手機版——那時就在這裡強制。</span></span>
@@ -3883,14 +4040,19 @@ function viewSettings(){
   const gb=$('#go-backup'); if(gb) gb.onclick=()=>{ SFX.tap(); BK_MSG=''; viewBackup(); };
   const gc=$('#go-cloud'); if(gc) gc.onclick=()=>{ SFX.tap(); CL_MSG=''; CL_REMOTE=null; viewCloud(); };
   $('#palette').onclick=e=>{ const b=e.target.closest('button'); if(!b)return;
-    S.palette=b.dataset.v; save(); applyPrefs(); SFX.tap(); viewSettings(); };
+    S.palette=b.dataset.v; save(); SFX.tap();
+    const missing = SUBJECTS.some(x=>PICS[x.key] && !(S.picColor||{})[x.key]);
+    if(S.palette==='pic' && missing){ refreshAllPicColors().then(()=>viewSettings()); }
+    else { applyPrefs(); viewSettings(); }
+  };
   $('#layout').onclick=e=>{ const b=e.target.closest('button'); if(!b)return;
     S.layout=b.dataset.v; save(); applyPrefs(); WAS_MODE=layoutOf(); SFX.tap(); viewSettings(); };
   let PICK=null;
   document.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{
     PICK=b.dataset.pick; SFX.tap(); $('#picfile').value=''; $('#picfile').click(); });
   document.querySelectorAll('[data-drop]').forEach(b=>b.onclick=()=>{
-    SFX.tap(); setPic(b.dataset.drop, null); viewSettings(); });
+    SFX.tap(); const k=b.dataset.drop; setPic(k, null);
+    refreshPicColor(k).then(()=>{ applyPrefs(); viewSettings(); }); });
   document.querySelectorAll('[data-paste]').forEach(b=>b.onclick=()=>{
     SFX.tap(); armPaste(b.dataset.paste); });
   $('#picfile').onchange=e=>{
@@ -3913,7 +4075,10 @@ function applyPrefs(){
   const r=document.documentElement;
   applyLayout();
   if(S.theme) r.setAttribute('data-theme',S.theme); else r.removeAttribute('data-theme');
-  if(S.palette) r.setAttribute('data-palette',S.palette); else r.removeAttribute('data-palette');
+  // 'pic' 不是 CSS 色票，是用行內變數覆蓋塗裝色，所以底層先掛 candy 的地面色
+  if(S.palette==='pic') r.setAttribute('data-palette','candy');
+  else if(S.palette) r.setAttribute('data-palette',S.palette); else r.removeAttribute('data-palette');
+  applyPicPalette();
   r.style.setProperty('--zoom', S.zoom);
   $('#btn-sound').setAttribute('aria-pressed', S.sound);
   $('#wave1').classList.toggle('hidden', !S.sound);
