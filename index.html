@@ -818,7 +818,7 @@ input[type=date]{font:inherit; font-size:14px; color:var(--ink); background:var(
      ② 浮在半空 → 腳下加接地陰影，會跟著跳動縮放
      ③ 四張照片各有各的色溫 → 疊一層該科塗裝色的 color 混合，四隻才像同一組 */
 .m-pic{width:100%; height:100%; position:relative; border-radius:50%; isolation:isolate}
-.m-pic i{position:absolute; inset:0; z-index:2; display:block; border-radius:50%;
+.m-pic i{position:absolute; inset:0; z-index:2; display:block; border-radius:50%; overflow:hidden;
   background-repeat:no-repeat; background-position:center 88%; background-size:80%;
   filter:saturate(.92) contrast(1.05) brightness(1.02);
   transform-origin:50% 92%;
@@ -828,7 +828,11 @@ input[type=date]{font:inherit; font-size:14px; color:var(--ink); background:var(
 /* 色溫統一：只在圖上，不吃到底盤 */
 .m-pic i::after{content:""; position:absolute; inset:0; background:var(--lit);
   mix-blend-mode:color; opacity:.13; pointer-events:none}
-.m-pic.fill i{background-size:cover; background-position:center}
+/* 帶背景的照片：整張填滿圓框，邊緣由 border-radius 乾淨切齊。
+   柔邊是為「去背剪影」準備的——照片套上去只會在邊緣留一圈糊掉的暈，
+   看起來就像圖沒放滿。 */
+.m-pic.fill i{background-size:cover; background-position:center;
+  -webkit-mask-image:none; mask-image:none}
 /* 接地陰影：讓它站在底盤上，而不是貼在上面 */
 .m-pic::after{content:""; position:absolute; left:26%; right:26%; bottom:10%; height:6%;
   z-index:1; border-radius:50%; background:rgba(0,0,0,.30); filter:blur(3px);
