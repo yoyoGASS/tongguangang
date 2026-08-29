@@ -1075,8 +1075,13 @@ const LSP = 'tkg.pics';
 const PIC_MAX = 256;                       // 存檔時的長邊上限，四張加起來約 100–200KB
 const PIC_WORK = 1024;                     // 裁切前的工作尺寸：先縮到這個大小才不會框完變糊
 /* 每一筆是 {d:資料URI, t:有沒有透明像素}。舊版存的是純字串，讀進來補成物件。 */
+/* 家用版的預設夥伴圖。**公開建置永遠是 null**——scripts/build.py 不碰這個置入點，
+   只有 scripts/family.py 會填。這樣「圖不會被推上公開的 repo」是流程保證的，不是靠記得。 */
+const DEFAULT_PICS = /*__DEFAULTPICS__*/null;
 let PICS = (()=>{
   let raw={}; try{ raw = JSON.parse(localStorage.getItem(LSP)||'{}'); }catch(e){ raw={}; }
+  // 這台還沒放過圖 → 用家用版內建的那組當起點（使用者隨時可以換掉或移除）
+  if(!Object.keys(raw).length && DEFAULT_PICS) raw = DEFAULT_PICS;
   const out={};
   for(const k in raw) out[k] = (typeof raw[k]==='string') ? {d:raw[k], t:false} : raw[k];
   return out;
