@@ -3675,6 +3675,21 @@ const fmtCode = c => String(c||'').replace(/(.{4})(?=.)/g,'$1-');
 const normCode = c => String(c||'').toUpperCase().split('')
   .filter(ch => CODE_ABC.indexOf(ch) >= 0).join('');
 
+/* 網址帶 ?sync=CODE 時直接接上那組碼——把連結傳給家人，他們點開就好，
+   不用自己打 12 個字。收下之後把網址清乾淨，免得碼一直留在網址列。 */
+function cloudCatchLink(){
+  try{
+    const raw = new URLSearchParams(location.search).get('sync');
+    if(!raw) return false;
+    const code = normCode(raw);
+    history.replaceState(null, '', location.origin + location.pathname);
+    if(code.length !== 12) return false;
+    CLOUD.code = code; saveCloud();
+    return true;
+  }catch(e){ return false; }
+}
+const syncLink = ()=> location.origin + location.pathname + '?sync=' + (CLOUD.code||'');
+
 async function rpc(fn, body){
   const r = await fetch(cloudBase()+'/rest/v1/rpc/'+fn, {
     method:'POST',
@@ -3776,9 +3791,14 @@ function viewCloud(){
           <b id="cl-codetext">${fmtCode(CLOUD.code)}</b>
           <span class="hint">在另一台輸入這組碼就接得上</span>
         </div>
+        <button class="row" id="cl-copylink" style="${subVars('practice')}">
+          <span class="swatch"></span>
+          <span><span class="row-t">複製同步連結</span>
+            <span class="row-m">LINK · 傳給家人，點開就自動接上，不用打字</span></span>
+          <span class="row-x">→</span></button>
         <button class="row" id="cl-copycode" style="${subVars('practice')}">
           <span class="swatch"></span>
-          <span><span class="row-t">複製同步碼</span><span class="row-m">COPY · 用 LINE 傳給自己最快</span></span>
+          <span><span class="row-t">只複製同步碼</span><span class="row-m">COPY · 12 個字</span></span>
           <span class="row-x">→</span></button>`
       : `<p class="cal-legend">還沒有碼。第一次用就按「產生新的同步碼」，它會把這台的進度放上去。</p>`}
 
@@ -3839,6 +3859,12 @@ function viewCloud(){
     CLOUD.url=u; CLOUD.key=k; saveCloud(); SFX.done(); clSay('存好了。接著產生同步碼。');
   });
   on('#cl-reset', ()=>{ CLOUD={}; saveCloud(); CL_REMOTE=null; clSay('已清掉設定。'); });
+  on('#cl-copylink', async ()=>{
+    SFX.tap();
+    const url = syncLink();
+    try{ await navigator.clipboard.writeText(url); clSay('已複製連結。傳給家人，他們點開就會自動接上這份進度。'); }
+    catch(e){ clSay('複製被擋了，連結是：<br><b style="word-break:break-all">'+esc(url)+'</b>'); }
+  });
   on('#cl-copycode', async ()=>{
     SFX.tap();
     try{ await navigator.clipboard.writeText(fmtCode(CLOUD.code)); clSay('已複製：'+fmtCode(CLOUD.code)); }
@@ -4063,5 +4089,32 @@ $('#btn-settings').onclick=()=>{ SFX.tap(); viewSettings(); };
 $('#go-home').onclick=()=>{ SFX.tap(); viewYard(); };
 
 applyPrefs();
-viewYard();
+// 網址帶 ?sync= 就直接接上；空白的裝置直接拉下來，有進度的先問過
+if(cloudCatchLink() && cloudReady()){
+  (async ()=>{
+    const r = await cloudGet(CLOUD.code);
+    const mine = Object.keys(S.records).length;
+    if(r.err || r.empty){
+      CL_MSG = r.err || '這組碼上面還沒有資料。';
+      return viewCloud();
+    }
+    const n = Object.keys((r.data.state&&r.data.state.records)||{}).length;
+    if(mine === 0){
+      S = Object.assign(defaults(), r.data.state);
+      if(r.data.pics){ PICS={};
+        for(const k in r.data.pics){ const v=r.data.pics[k]; PICS[k]=(typeof v==='string')?{d:v,t:false}:v; }
+        savePics(); }
+      save(); applyPrefs();
+      SFX.done();
+      CL_MSG = '接上了，這台已經同步好 '+n+' 櫃與夥伴圖像。';
+      return viewCloud();
+    }
+    CL_REMOTE = r;
+    CL_MSG = '接上了，這組碼上面有 <b>'+n+'</b> 櫃，這台有 '+mine+' 櫃。<br>'
+           + '按「合併」把兩邊併起來，或按「下載」用雲端那份覆蓋這台。';
+    viewCloud();
+  })();
+} else {
+  viewYard();
+}
 </script>
