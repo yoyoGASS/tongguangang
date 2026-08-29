@@ -3682,18 +3682,38 @@ const normCode = c => String(c||'').toUpperCase().split('')
 
 /* 網址帶 ?sync=CODE 時直接接上那組碼——把連結傳給家人，他們點開就好，
    不用自己打 12 個字。收下之後把網址清乾淨，免得碼一直留在網址列。 */
+/* 連結同時帶 Supabase 設定與同步碼，新裝置才能真的「點開就好」——
+   否則它還要自己填網址與金鑰，等於沒解決問題。
+   金鑰放連結裡是可以的：anon key 本來就設計成公開，資料表也沒開放直接讀寫。
+   但**整條連結等同密碼**（有碼就讀得到進度），所以只傳給自己人。 */
+const b64u = {
+  enc: o => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''),
+  dec: t => JSON.parse(decodeURIComponent(escape(atob(String(t).replace(/-/g,'+').replace(/_/g,'/')))))
+};
 function cloudCatchLink(){
   try{
-    const raw = new URLSearchParams(location.search).get('sync');
+    const q = new URLSearchParams(location.search);
+    const raw = q.get('sync'), sb = q.get('sb');
+    if(!raw && !sb) return false;
+    history.replaceState(null, '', location.origin + location.pathname);
+    if(sb){                                   // 這台還沒設定過才採用，不覆蓋既有的
+      try{
+        const c = b64u.dec(sb);
+        if(c && c.u && c.k && !cloudReady()){ CLOUD.url=c.u; CLOUD.key=c.k; saveCloud(); }
+      }catch(e){}
+    }
     if(!raw) return false;
     const code = normCode(raw);
-    history.replaceState(null, '', location.origin + location.pathname);
     if(code.length !== 12) return false;
     CLOUD.code = code; saveCloud();
     return true;
   }catch(e){ return false; }
 }
-const syncLink = ()=> location.origin + location.pathname + '?sync=' + (CLOUD.code||'');
+function syncLink(withConfig){
+  let u = location.origin + location.pathname + '?sync=' + (CLOUD.code||'');
+  if(withConfig && CLOUD.url && CLOUD.key) u += '&sb=' + b64u.enc({u:CLOUD.url, k:CLOUD.key});
+  return u;
+}
 
 async function rpc(fn, body){
   const r = await fetch(cloudBase()+'/rest/v1/rpc/'+fn, {
@@ -3774,6 +3794,7 @@ function viewCloud(){
     <div class="section-title plate">同步碼</div>
     <p class="cal-legend">一台產生一組碼，另一台輸入那組碼就讀得到進度。沒有帳號、不用登入。<br>
       <b>知道碼的人就能讀到這份進度</b>，所以別貼到公開的地方。碼隨時可以重產，舊的就失效。<br>
+      「完整連結」還夾帶了你的 Supabase 設定，新裝置點開什麼都不用填——同樣只傳給自己人。<br>
       需要網路；在嵌入式的檢視環境（artifact）會被擋，請用 GitHub Pages 的網址。</p>
 
     ${!cloudReady() ? `
@@ -3796,10 +3817,15 @@ function viewCloud(){
           <b id="cl-codetext">${fmtCode(CLOUD.code)}</b>
           <span class="hint">在另一台輸入這組碼就接得上</span>
         </div>
+        <button class="row" id="cl-copyfull" style="${subVars('practice')}">
+          <span class="swatch"></span>
+          <span><span class="row-t">複製完整連結（推薦）</span>
+            <span class="row-m">LINK · 新裝置點開就好，什麼都不用設定</span></span>
+          <span class="row-x">→</span></button>
         <button class="row" id="cl-copylink" style="${subVars('practice')}">
           <span class="swatch"></span>
-          <span><span class="row-t">複製同步連結</span>
-            <span class="row-m">LINK · 傳給家人，點開就自動接上，不用打字</span></span>
+          <span><span class="row-t">複製短連結</span>
+            <span class="row-m">LINK · 給已經設定過 Supabase 的裝置</span></span>
           <span class="row-x">→</span></button>
         <button class="row" id="cl-copycode" style="${subVars('practice')}">
           <span class="swatch"></span>
@@ -3864,9 +3890,17 @@ function viewCloud(){
     CLOUD.url=u; CLOUD.key=k; saveCloud(); SFX.done(); clSay('存好了。接著產生同步碼。');
   });
   on('#cl-reset', ()=>{ CLOUD={}; saveCloud(); CL_REMOTE=null; clSay('已清掉設定。'); });
+  on('#cl-copyfull', async ()=>{
+    SFX.tap();
+    const url = syncLink(true);
+    try{ await navigator.clipboard.writeText(url);
+      clSay('已複製完整連結（'+url.length+' 個字）。傳給家人，點開就自動接上——'
+          + '不用填網址、不用打碼。<br><b>這條連結等同密碼，只傳給自己人。</b>'); }
+    catch(e){ clSay('複製被擋了，連結是：<br><b style="word-break:break-all;font-size:11px">'+esc(url)+'</b>'); }
+  });
   on('#cl-copylink', async ()=>{
     SFX.tap();
-    const url = syncLink();
+    const url = syncLink(false);
     try{ await navigator.clipboard.writeText(url); clSay('已複製連結。傳給家人，他們點開就會自動接上這份進度。'); }
     catch(e){ clSay('複製被擋了，連結是：<br><b style="word-break:break-all">'+esc(url)+'</b>'); }
   });
