@@ -980,17 +980,27 @@ input[type=date]{font:inherit; font-size:14px; color:var(--ink); background:var(
   font-size:11.5px; line-height:1.5; padding:10px 11px; color:var(--ink);
   background:var(--yard-2); border:1px solid var(--line); border-radius:var(--r)}
 .bk-paste .btn{min-height:42px}
+/* 雲端同步 */
+.cl-form{display:grid; gap:12px; padding:4px var(--pad) 0}
+.cl-form label{display:grid; gap:5px; font-size:13px; color:var(--ink-2)}
+.cl-form input,.cl-form textarea{width:100%; font-size:13px; padding:10px 11px; color:var(--ink);
+  background:var(--yard-2); border:1px solid var(--line); border-radius:var(--r);
+  font-family:ui-monospace,monospace}
+.cl-form textarea{resize:vertical; line-height:1.5}
+.cl-form .btn{min-height:44px}
+.wordmark{cursor:pointer; border:none; background:none; padding:0}
+.wordmark:hover b{text-decoration:underline; text-underline-offset:3px}
 .hidden{display:none !important}
 </style>
 
 <header><div class="header-inner">
-  <span class="wordmark">
+  <button class="wordmark" id="go-home" title="回堆場">
     <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
       <rect x="2" y="7" width="20" height="11" rx="1" fill="none" stroke="currentColor" stroke-width="1.7"/>
       <path d="M5.5 7v11M9 7v11M12.5 7v11M16 7v11M19 7v11" stroke="currentColor" stroke-width="1.1" opacity=".55"/>
     </svg>
     <b>通關港</b>
-  </span>
+  </button>
   <button class="iconbtn" id="btn-sound" aria-pressed="true" title="音效">
     <svg viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path id="wave1" d="M15 9.5a3.5 3.5 0 0 1 0 5"/><path id="wave2" d="M17.8 7a7 7 0 0 1 0 10"/><path id="mute" class="hidden" d="m16 10 5 5m0-5-5 5"/></svg>
   </button>
@@ -3414,6 +3424,14 @@ function viewBackup(){
   const recs = Object.keys(S.records).length;
   const figs = Object.values(S.figs||{}).filter(n=>n>0).length;
   app().innerHTML = `
+    <div class="section-title plate">雲端同步</div>
+    <button class="row" id="go-cloud" style="${subVars('law')}">
+      <span class="swatch"></span>
+      <span><span class="row-t">${cloudSignedIn()? '已連上雲端 · '+esc(CLOUD.email||'') : (cloudReady()? '已設定，還沒登入' : '設定雲端同步（手機與電腦接得上）')}</span>
+        <span class="row-m">CLOUD · 用你自己的 Supabase 專案，金鑰不進原始碼</span></span>
+      <span class="row-x">→</span>
+    </button>
+
     <div class="section-title plate">進度備份</div>
     <p class="cal-legend">作答紀錄存在這台裝置的瀏覽器裡，換裝置不會跟著走，清瀏覽器資料也會沒有。
       匯出一份帶著走，就是搬家的方法，也是唯一的備份。</p>
@@ -3508,6 +3526,279 @@ function doImport(text){
   viewBackup();
 }
 
+/* ─── 雲端同步（Supabase）─────────────────────────────────────
+   目標：手機與電腦接得上，清掉瀏覽器資料也不會消失。
+
+   幾個刻意的決定：
+   · **不用 SDK，只用 fetch。** 這頁的價值之一是單一自足的 HTML，
+     載入外部函式庫就沒了。Supabase 的 REST 與 Auth 都是純 HTTP。
+   · **金鑰不寫進原始碼。** repo 是公開的。網址與 anon key 由使用者自己填，
+     存在本機（`tkg.cloud`）。anon key 本來就是設計成公開的，真正的防線是資料庫的 RLS。
+   · **不做自動雙向合併。** 間隔複習的排程被錯誤合併會直接毀掉學習節奏。
+     三個動作都要使用者自己按，而且按之前一定先看到「雲端有什麼 vs 本機有什麼」。
+   · 網路請求在 artifact 檢視環境會被擋，這套只在 GitHub Pages／本機檔案上有效。 */
+const LSC = 'tkg.cloud';
+let CLOUD = (()=>{ try{ return JSON.parse(localStorage.getItem(LSC)||'{}'); }catch(e){ return {}; } })();
+function saveCloud(){ try{ localStorage.setItem(LSC, JSON.stringify(CLOUD)); return true; }catch(e){ return false; } }
+const cloudReady = ()=> !!(CLOUD.url && CLOUD.key);
+const cloudSignedIn = ()=> !!(cloudReady() && CLOUD.access && CLOUD.uid);
+
+function cloudBase(){ return String(CLOUD.url||'').replace(/\/+$/,''); }
+async function cloudFetch(path, opt){
+  opt = opt || {};
+  const h = Object.assign({
+    'apikey': CLOUD.key,
+    'Content-Type': 'application/json'
+  }, opt.headers || {});
+  if(CLOUD.access) h['Authorization'] = 'Bearer ' + CLOUD.access;
+  const r = await fetch(cloudBase() + path, Object.assign({}, opt, {headers:h}));
+  return r;
+}
+/* access token 一小時就過期，過期了先用 refresh token 換一張再重試 */
+async function cloudRefresh(){
+  if(!CLOUD.refresh) return false;
+  try{
+    const r = await fetch(cloudBase()+'/auth/v1/token?grant_type=refresh_token', {
+      method:'POST',
+      headers:{'apikey':CLOUD.key, 'Content-Type':'application/json'},
+      body: JSON.stringify({refresh_token: CLOUD.refresh})
+    });
+    if(!r.ok) return false;
+    const j = await r.json();
+    if(!j.access_token) return false;
+    CLOUD.access = j.access_token;
+    CLOUD.refresh = j.refresh_token || CLOUD.refresh;
+    CLOUD.uid = (j.user && j.user.id) || CLOUD.uid;
+    saveCloud();
+    return true;
+  }catch(e){ return false; }
+}
+async function cloudTry(path, opt){
+  let r = await cloudFetch(path, opt);
+  if(r.status === 401 && await cloudRefresh()) r = await cloudFetch(path, opt);
+  return r;
+}
+
+/* 寄登入信。使用者點信裡的連結回到本站，token 掛在網址的 # 後面 */
+async function cloudSendLink(email){
+  const back = location.origin + location.pathname;
+  const r = await fetch(cloudBase()+'/auth/v1/otp', {
+    method:'POST',
+    headers:{'apikey':CLOUD.key, 'Content-Type':'application/json'},
+    body: JSON.stringify({email, create_user:true, options:{email_redirect_to:back}})
+  });
+  if(r.ok) return {ok:true};
+  let msg = '寄送失敗（' + r.status + '）。';
+  try{ const j = await r.json(); if(j.msg||j.error_description||j.message) msg += (j.msg||j.error_description||j.message); }catch(e){}
+  return {ok:false, err:msg};
+}
+/* 從信裡回來時，網址的 hash 會帶著 token。收下就清掉，不要留在網址列。 */
+function cloudCatchHash(){
+  const h = location.hash || '';
+  if(h.indexOf('access_token=') < 0) return false;
+  const p = new URLSearchParams(h.slice(1));
+  const at = p.get('access_token'), rt = p.get('refresh_token');
+  if(!at) return false;
+  CLOUD.access = at;
+  if(rt) CLOUD.refresh = rt;
+  try{
+    const body = JSON.parse(atob(at.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    CLOUD.uid = body.sub; CLOUD.email = body.email || CLOUD.email;
+  }catch(e){}
+  saveCloud();
+  history.replaceState(null, '', location.origin + location.pathname + location.search);
+  return true;
+}
+function cloudSignOut(){
+  delete CLOUD.access; delete CLOUD.refresh; delete CLOUD.uid; delete CLOUD.email;
+  saveCloud();
+}
+
+/* ─── 讀寫 ───────────────────────────────────────────────── */
+async function cloudPull(){
+  const r = await cloudTry('/rest/v1/progress?select=data,updated_at&user_id=eq.'+encodeURIComponent(CLOUD.uid), {method:'GET'});
+  if(!r.ok) return {err:'讀取失敗（'+r.status+'）。'+(r.status===401?'登入可能過期了，請重新登入。':'')};
+  const rows = await r.json();
+  if(!rows.length) return {empty:true};
+  return {data: rows[0].data, at: rows[0].updated_at};
+}
+async function cloudPush(){
+  const body = [{ user_id: CLOUD.uid, data: {state:S, pics:PICS}, updated_at: new Date().toISOString() }];
+  const r = await cloudTry('/rest/v1/progress?on_conflict=user_id', {
+    method:'POST',
+    headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+    body: JSON.stringify(body)
+  });
+  if(!r.ok){
+    let t=''; try{ t=await r.text(); }catch(e){}
+    return {err:'上傳失敗（'+r.status+'）。'+t.slice(0,160)};
+  }
+  CLOUD.lastPush = new Date().toISOString(); saveCloud();
+  return {ok:true};
+}
+/* 合併：逐題取「作答時間較新」的那一筆。
+   這是這份資料唯一安全的合併方式——同一題在兩台各答過，較新的那次才反映現況。 */
+function mergeRecords(mine, theirs){
+  const out = Object.assign({}, mine);
+  let added = 0, updated = 0;
+  for(const id in theirs){
+    const t = theirs[id], m = out[id];
+    if(!m){ out[id] = t; added++; continue; }
+    if((t.at||0) > (m.at||0)){ out[id] = t; updated++; }
+  }
+  return {records: out, added, updated};
+}
+
+let CL_MSG = '', CL_BUSY = false, CL_REMOTE = null;
+
+function clSay(m){ CL_MSG = m; viewCloud(); }
+async function clGuard(fn){
+  if(CL_BUSY) return;
+  CL_BUSY = true; viewCloud();
+  try{ await fn(); }catch(e){ CL_MSG = '出錯了：' + (e && e.message ? e.message : e); }
+  CL_BUSY = false; viewCloud();
+}
+
+function viewCloud(){
+  hush(); enter('settings');
+  const ready = cloudReady(), signed = cloudSignedIn();
+  const recs = Object.keys(S.records).length;
+
+  app().innerHTML = `
+    <div class="section-title plate">雲端同步</div>
+    <p class="cal-legend">把進度存到你自己的 Supabase 專案，手機和電腦就接得上，清掉瀏覽器資料也不會消失。<br>
+      <b>你的網址與金鑰只存在這台裝置</b>，不會進到公開的原始碼裡。<br>
+      這個功能需要網路連線，在嵌入式的檢視環境（artifact）會被擋，請用 GitHub Pages 的網址。</p>
+
+    ${!ready ? `
+      <div class="section-title plate">第一步 · 填入你的專案</div>
+      <p class="cal-legend">Supabase 後台 → Project Settings → Data API，複製 <b>Project URL</b> 與
+        <b>anon / public</b> 那把金鑰。anon key 本來就是設計成公開的，真正的防線是資料庫的 RLS 規則。</p>
+      <div class="cl-form">
+        <label>Project URL<input id="cl-url" type="url" placeholder="https://xxxx.supabase.co" value="${esc(CLOUD.url||'')}"></label>
+        <label>anon key<textarea id="cl-key" rows="3" placeholder="eyJhbGciOi…" spellcheck="false">${esc(CLOUD.key||'')}</textarea></label>
+        <button class="btn" id="cl-save">儲存</button>
+      </div>`
+    : !signed ? `
+      <div class="set-row"><span class="lab">專案<span class="sub">${esc(cloudBase())}</span></span>
+        <button class="btn-ghost btn" id="cl-reset" style="flex:none;min-height:38px;padding:0 14px;font-size:12.5px">改</button></div>
+      <div class="section-title plate">第二步 · 登入</div>
+      <p class="cal-legend">輸入 email，會收到一封信。點信裡的連結回到這個網站就登入了，不用設密碼。
+        兩台裝置各做一次。</p>
+      <div class="cl-form">
+        <label>Email<input id="cl-mail" type="email" placeholder="you@example.com" value="${esc(CLOUD.email||'')}"></label>
+        <button class="btn" id="cl-send">${CL_BUSY?'寄送中…':'寄登入連結給我'}</button>
+      </div>`
+    : `
+      <div class="set-row"><span class="lab">已登入<span class="sub">${esc(CLOUD.email||CLOUD.uid)}</span></span>
+        <button class="btn-ghost btn" id="cl-out" style="flex:none;min-height:38px;padding:0 14px;font-size:12.5px">登出</button></div>
+      <div class="set-row"><span class="lab">這台裝置<span class="sub">${S.lastActive? '最後作答 '+S.lastActive : '還沒開始'}</span></span>
+        <b class="plate">${recs} 櫃</b></div>
+      <div class="set-row"><span class="lab">雲端<span class="sub">${
+        CL_REMOTE === null ? '還沒查詢。' :
+        CL_REMOTE.empty ? '雲端還是空的，先上傳一次。' :
+        CL_REMOTE.err ? esc(CL_REMOTE.err) :
+        '更新於 ' + new Date(CL_REMOTE.at).toLocaleString('zh-TW')
+      }</span></span><b class="plate">${
+        CL_REMOTE && CL_REMOTE.data && CL_REMOTE.data.state ? Object.keys(CL_REMOTE.data.state.records||{}).length + ' 櫃' : '—'
+      }</b></div>
+
+      <button class="row" id="cl-check" style="${subVars('law')}">
+        <span class="swatch"></span>
+        <span><span class="row-t">查看雲端現在有什麼</span><span class="row-m">CHECK · 只讀取，不會改動任何東西</span></span>
+        <span class="row-x">→</span></button>
+
+      <div class="section-title plate">動作</div>
+      <button class="row" id="cl-push" style="${subVars('practice')}">
+        <span class="swatch"></span>
+        <span><span class="row-t">上傳：這台 → 雲端</span><span class="row-m">PUSH · 覆蓋雲端上的那一份</span></span>
+        <span class="row-x">→</span></button>
+      <button class="row" id="cl-merge" style="${subVars('english')}">
+        <span class="swatch"></span>
+        <span><span class="row-t">合併：逐題取較新的那一次</span><span class="row-m">MERGE · 兩台都練過時用這個，最安全</span></span>
+        <span class="row-x">→</span></button>
+      <button class="row" id="cl-pull" style="${subVars('tariff')}">
+        <span class="swatch"></span>
+        <span><span class="row-t">下載：雲端 → 這台（覆蓋）</span><span class="row-m">PULL · 這台的進度會被蓋掉</span></span>
+        <span class="row-x">→</span></button>
+      <p class="cal-legend">三個動作都要自己按，不會自動同步——間隔複習的排程被錯誤合併會直接毀掉學習節奏，
+        寧可你每次自己決定。日常用「合併」就好。</p>`}
+
+    ${CL_MSG ? `<div class="cal-verdict settle"><b>結果</b>${CL_MSG}</div>` : ''}`;
+
+  dock(`<button class="btn" id="back">回設定</button>`);
+  $('#back').onclick=()=>{ SFX.tap(); CL_MSG=''; CL_REMOTE=null; viewSettings(); };
+
+  const on=(id,fn)=>{ const el=$(id); if(el) el.onclick=fn; };
+  on('#cl-save', ()=>{
+    const u=($('#cl-url').value||'').trim(), k=($('#cl-key').value||'').trim();
+    if(!/^https?:\/\/.+/.test(u)) return clSay('網址看起來不對，要像 https://xxxx.supabase.co');
+    if(k.length < 30) return clSay('金鑰看起來太短，確認複製的是 anon / public 那一把。');
+    CLOUD.url=u; CLOUD.key=k; saveCloud(); SFX.done(); clSay('存好了。接著登入。');
+  });
+  on('#cl-reset', ()=>{ CLOUD={}; saveCloud(); clSay('已清掉設定。'); });
+  on('#cl-out', ()=>{ cloudSignOut(); CL_REMOTE=null; clSay('已登出。這台的進度還在，沒有被刪。'); });
+  on('#cl-send', ()=>clGuard(async ()=>{
+    const m=($('#cl-mail').value||'').trim();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m)){ CL_MSG='email 格式不對。'; return; }
+    CLOUD.email=m; saveCloud();
+    const r = await cloudSendLink(m);
+    CL_MSG = r.ok ? '信寄出去了，去收信點裡面的連結。連結會把你帶回這個網站並自動登入。' : r.err;
+  }));
+  on('#cl-check', ()=>clGuard(async ()=>{
+    CL_REMOTE = await cloudPull();
+    CL_MSG = CL_REMOTE.err ? CL_REMOTE.err
+           : CL_REMOTE.empty ? '雲端還沒有資料。按「上傳」放上去。'
+           : '讀到了，看上面的數字。';
+  }));
+  on('#cl-push', ()=>clGuard(async ()=>{
+    if(!confirm('要用這台的 '+recs+' 櫃覆蓋雲端上的那一份嗎？')) { CL_MSG='已取消。'; return; }
+    const r = await cloudPush();
+    if(r.err){ CL_MSG=r.err; SFX.hold(); return; }
+    CL_REMOTE = await cloudPull();
+    SFX.done(); CL_MSG='上傳完成。';
+  }));
+  on('#cl-pull', ()=>clGuard(async ()=>{
+    const r = await cloudPull();
+    if(r.err){ CL_MSG=r.err; SFX.hold(); return; }
+    if(r.empty){ CL_MSG='雲端是空的，沒有東西可以下載。'; return; }
+    const n = Object.keys((r.data.state&&r.data.state.records)||{}).length;
+    if(!confirm('雲端有 '+n+' 櫃，這台有 '+recs+' 櫃。\n\n下載會「覆蓋」這台的進度，無法復原。要繼續嗎？')){
+      CL_MSG='已取消，什麼都沒有改。'; return;
+    }
+    S = Object.assign(defaults(), r.data.state);
+    if(r.data.pics){ PICS={};
+      for(const k in r.data.pics){ const v=r.data.pics[k]; PICS[k]=(typeof v==='string')?{d:v,t:false}:v; }
+      savePics(); }
+    save(); applyPrefs(); CL_REMOTE=r;
+    SFX.done(); CL_MSG='下載完成，這台現在有 '+Object.keys(S.records).length+' 櫃。';
+  }));
+  on('#cl-merge', ()=>clGuard(async ()=>{
+    const r = await cloudPull();
+    if(r.err){ CL_MSG=r.err; SFX.hold(); return; }
+    if(r.empty){ CL_MSG='雲端是空的，先按「上傳」。'; return; }
+    const theirs = (r.data.state&&r.data.state.records)||{};
+    const m = mergeRecords(S.records, theirs);
+    if(!m.added && !m.updated){ CL_REMOTE=r; CL_MSG='兩邊一樣，沒有東西要合併。'; return; }
+    if(!confirm('合併會：\n　新增 '+m.added+' 題（這台沒有、雲端有）\n　更新 '+m.updated+' 題（雲端那次比較新）\n\n'
+                +'其餘保持不動。合併後會自動上傳。要繼續嗎？')){ CL_MSG='已取消。'; return; }
+    S.records = m.records;
+    // 公仔與膠料取兩邊較多的，不會因為合併而變少
+    const tf = (r.data.state&&r.data.state.figs)||{};
+    S.figs = S.figs||{};
+    for(const k in tf) S.figs[k] = Math.max(S.figs[k]||0, tf[k]||0);
+    S.goo   = Math.max(S.goo||0,   (r.data.state&&r.data.state.goo)||0);
+    S.boxes = Math.max(S.boxes||0, (r.data.state&&r.data.state.boxes)||0);
+    S.best  = Math.max(S.best||0,  (r.data.state&&r.data.state.best)||0);
+    save();
+    const up = await cloudPush();
+    CL_REMOTE = await cloudPull();
+    SFX.done();
+    CL_MSG = '合併完成：新增 '+m.added+' 題、更新 '+m.updated+' 題，現在共 '
+           + Object.keys(S.records).length + ' 櫃。' + (up.err ? '（但回傳雲端失敗：'+up.err+'）' : '已回傳雲端。');
+  }));
+}
+
 /* ─── 畫面：設定 ─────────────────────────────────────────── */
 function viewSettings(){
   hush(); enter('settings');
@@ -3590,6 +3881,7 @@ function viewSettings(){
   $('#picplate').onclick=e=>{ const b=e.target.closest('button'); if(!b)return;
     S.picPlate = b.dataset.v==='1'; save(); SFX.tap(); viewSettings(); };
   const gb=$('#go-backup'); if(gb) gb.onclick=()=>{ SFX.tap(); BK_MSG=''; viewBackup(); };
+  const gc=$('#go-cloud'); if(gc) gc.onclick=()=>{ SFX.tap(); CL_MSG=''; CL_REMOTE=null; viewCloud(); };
   $('#palette').onclick=e=>{ const b=e.target.closest('button'); if(!b)return;
     S.palette=b.dataset.v; save(); applyPrefs(); SFX.tap(); viewSettings(); };
   $('#layout').onclick=e=>{ const b=e.target.closest('button'); if(!b)return;
@@ -3639,7 +3931,10 @@ $('#btn-theme').onclick=()=>{
   S.theme = cur==='dark'?'light':'dark'; save(); applyPrefs(); SFX.tap();
 };
 $('#btn-settings').onclick=()=>{ SFX.tap(); viewSettings(); };
+$('#go-home').onclick=()=>{ SFX.tap(); viewYard(); };
 
 applyPrefs();
+// 從登入信回來時網址的 # 帶著 token，收下並清掉網址列
+try{ cloudCatchHash(); }catch(e){}
 viewYard();
 </script>
