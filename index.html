@@ -1332,114 +1332,137 @@ function applyPicPalette(){
   });
 }
 
-/* ─── 夥伴 ───────────────────────────────────────────────────
-   第四版。前三版醜的原因是**加法做過頭**——接縫線、鋸齒牙、鼻子、嘴筒、
-   高光五種細節擠在 50px 見方裡，變成一團雜訊，縮小後更糊。
-   這版改成減法：
+/* ─── 夥伴：四隻品種貓 ───────────────────────────────────────
+   延續第四版的減法原則：頭與身體兩個相疊的橢圓，臉上只有實心眼、腮紅、
+   三角鼻與 ω 嘴。細節塞太多在 28px 下只會變成雜訊。
 
-     剪影  頭與身體兩個相疊的橢圓（絨毛玩偶的基本型），物種特徵長在輪廓上
-     臉    兩顆實心眼＋一點高光＋腮紅＋一條小嘴。就這樣，不加鼻子不加牙
-     元素  每隻控制在 10 個形狀以內（前一版約 18 個）
+   **物種（品種）靠耳朵分**，那是四隻剪影差最多的地方：
+     摺耳貓  耳朵往下折，幾乎貼著頭
+     暹羅貓  最大的直立三角耳
+     波斯貓  耳朵極小，靠蓬鬆的毛邊輪廓辨識
+     緬因貓  高聳的簇毛耳＋頸部鬃毛
 
-   兩個顏色是有語意的，不能互換（見 design-decisions）：
-     c  ＝ 本體      on ＝ 挖空／背景色
-   兩種脈絡：onLivery（色場上→本體反白）、onYard（地面上→本體用 -lit 色）。
-   **所有 on 色的元素都必須落在 c 色剪影之內**，突出去的部分會直接消失。 */
+   鬍鬚一律畫在頭的剪影「之內」——畫到外面的話，在塗裝色場上會整個消失。
+
+   兩個顏色不能互換：c ＝ 本體、on ＝ 挖空／背景色。
+   兩種脈絡：onLivery（色場上→本體反白）、onYard（地面上→本體用 -lit 色）。 */
+/* 蓬鬆的毛邊輪廓：把橢圓拆成鋸齒。波斯貓的臉與緬因貓的鬃毛用它。 */
+function furRing(cx, cy, rx, ry, n, amp){
+  let d = '';
+  for(let i=0;i<n*2;i++){
+    const a = (i/(n*2))*Math.PI*2 - Math.PI/2;
+    const k = (i%2) ? 1 : 1+amp;
+    d += (i?'L':'M') + (cx+Math.cos(a)*rx*k).toFixed(1) + ' ' + (cy+Math.sin(a)*ry*k).toFixed(1);
+  }
+  return d + 'Z';
+}
+
 const MASCOTS = {
-  practice:{name:'阿關', kind:'米格魯', svg:(c,on)=>`
+  practice:{name:'阿關', kind:'摺耳貓', svg:(c,on)=>`
     <svg viewBox="0 0 100 100" aria-hidden="true">
       <g class="m-body">
-        <ellipse cx="15" cy="61" rx="8.5" ry="26" transform="rotate(-17 15 61)" fill="${c}"/>
-        <ellipse cx="85" cy="61" rx="8.5" ry="26" transform="rotate(17 85 61)" fill="${c}"/>
-        <ellipse cx="50" cy="74" rx="26" ry="23" fill="${c}"/>
-        <path class="m-tail" d="M76 78c8-2 12-8 11-15-3 6-7 9-12 10z" fill="${c}"/>
-        <ellipse cx="37" cy="94" rx="9" ry="5" fill="${c}"/>
-        <ellipse cx="63" cy="94" rx="9" ry="5" fill="${c}"/>
+        <ellipse cx="50" cy="76" rx="26" ry="22" fill="${c}"/>
+        <path class="m-tail" d="M74 82c11-1 17-9 16-19-2 8-8 12-16 12z" fill="${c}"/>
+        <ellipse cx="38" cy="95" rx="9" ry="5" fill="${c}"/>
+        <ellipse cx="62" cy="95" rx="9" ry="5" fill="${c}"/>
         <g class="m-head">
-          <ellipse cx="50" cy="40" rx="28" ry="27" fill="${c}"/>
-          <ellipse cx="35" cy="38" rx="13" ry="12" fill="${on}" opacity=".2"/>
-          <ellipse class="m-eye" cx="35" cy="39" rx="6.6" ry="7.6" fill="${on}"/>
-          <ellipse class="m-eye" cx="65" cy="39" rx="6.6" ry="7.6" fill="${on}"/>
-          <circle cx="37.2" cy="36.4" r="2.2" fill="${c}"/>
-          <circle cx="67.2" cy="36.4" r="2.2" fill="${c}"/>
-          <ellipse cx="24" cy="53" rx="6.5" ry="4.2" fill="${on}" opacity=".3"/>
-          <ellipse cx="76" cy="53" rx="6.5" ry="4.2" fill="${on}" opacity=".3"/>
-          <path d="M43 55q7 6 14 0" stroke="${on}" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+          <ellipse cx="50" cy="42" rx="30" ry="28" fill="${c}"/>
+          <path d="M24 25c9-4 15-2 17 4 1 5-3 9-9 10-6 1-10-3-10-8 0-3 1-5 2-6z" fill="${c}"/>
+          <path d="M76 25c-9-4-15-2-17 4-1 5 3 9 9 10 6 1 10-3 10-8 0-3-1-5-2-6z" fill="${c}"/>
+          <path d="M27 29c6-2 10-1 11 3" stroke="${on}" stroke-width="2" fill="none"
+                stroke-linecap="round" opacity=".45"/>
+          <path d="M73 29c-6-2-10-1-11 3" stroke="${on}" stroke-width="2" fill="none"
+                stroke-linecap="round" opacity=".45"/>
+          <ellipse class="m-eye" cx="37" cy="41" rx="7.6" ry="8.4" fill="${on}"/>
+          <ellipse class="m-eye" cx="63" cy="41" rx="7.6" ry="8.4" fill="${on}"/>
+          <circle cx="39.4" cy="38.4" r="2.5" fill="${c}"/>
+          <circle cx="65.4" cy="38.4" r="2.5" fill="${c}"/>
+          <ellipse cx="24" cy="55" rx="6.5" ry="4.2" fill="${on}" opacity=".3"/>
+          <ellipse cx="76" cy="55" rx="6.5" ry="4.2" fill="${on}" opacity=".3"/>
+          <path d="M50 52l-3.4 3.4h6.8z" fill="${on}"/>
+          <path d="M43.5 58q3.3 4 6.5 0 3.2 4 6.5 0" stroke="${on}" stroke-width="2.2"
+                fill="none" stroke-linecap="round"/>
+          <path d="M28 47h7M28 51h6M72 47h-7M72 51h-6" stroke="${on}" stroke-width="1.4"
+                stroke-linecap="round" opacity=".4"/>
         </g>
       </g>
     </svg>`},
 
-  law:{name:'律律', kind:'貓頭鷹', svg:(c,on)=>`
+  law:{name:'律律', kind:'暹羅貓', svg:(c,on)=>`
     <svg viewBox="0 0 100 100" aria-hidden="true">
       <g class="m-body">
-        <ellipse cx="50" cy="68" rx="30" ry="27" fill="${c}"/>
-        <path d="M21 62c-7 5-10 15-6 24 3-8 8-14 13-16z" fill="${c}"/>
-        <path d="M79 62c7 5 10 15 6 24-3-8-8-14-13-16z" fill="${c}"/>
-        <ellipse cx="39" cy="93" rx="8" ry="4.5" fill="${c}"/>
-        <ellipse cx="61" cy="93" rx="8" ry="4.5" fill="${c}"/>
+        <ellipse cx="50" cy="76" rx="23" ry="21" fill="${c}"/>
+        <path class="m-tail" d="M71 84c13 2 21-6 22-18-4 9-12 13-22 11z" fill="${c}"/>
+        <ellipse cx="39" cy="94" rx="8" ry="4.6" fill="${c}"/>
+        <ellipse cx="61" cy="94" rx="8" ry="4.6" fill="${c}"/>
         <g class="m-head">
-          <path d="M25 22c-3-9-2-15 1-17 3 5 8 11 13 13z" fill="${c}"/>
-          <path d="M75 22c3-9 2-15-1-17-3 5-8 11-13 13z" fill="${c}"/>
-          <ellipse cx="50" cy="38" rx="31" ry="28" fill="${c}"/>
-          <circle class="m-eye" cx="36" cy="36" rx="9" fill="${on}" r="9"/>
-          <circle class="m-eye" cx="64" cy="36" rx="9" fill="${on}" r="9"/>
-          <circle cx="36" cy="36.5" r="3.6" fill="${c}"/>
-          <circle cx="64" cy="36.5" r="3.6" fill="${c}"/>
-          <circle cx="33.4" cy="33.4" r="1.8" fill="${on}"/>
-          <circle cx="61.4" cy="33.4" r="1.8" fill="${on}"/>
-          <path d="M50 46l-4.5 7h9z" fill="${on}"/>
-          <ellipse cx="22" cy="49" rx="6" ry="4" fill="${on}" opacity=".28"/>
-          <ellipse cx="78" cy="49" rx="6" ry="4" fill="${on}" opacity=".28"/>
-        </g>
-        <path d="M40 76q10 7 20 0" stroke="${on}" stroke-width="2" fill="none"
-              stroke-linecap="round" opacity=".35"/>
-      </g>
-    </svg>`},
-
-  tariff:{name:'碼碼', kind:'松鼠', svg:(c,on)=>`
-    <svg viewBox="0 0 100 100" aria-hidden="true">
-      <g class="m-body">
-        <path class="m-tail" d="M72 86c17-6 24-24 17-40-6-13-19-18-26-12 8 2 14 10 15 20 1 12-1 26-11 32z" fill="${c}"/>
-        <ellipse cx="43" cy="74" rx="25" ry="22" fill="${c}"/>
-        <ellipse cx="32" cy="92" rx="8" ry="4.5" fill="${c}"/>
-        <ellipse cx="54" cy="92" rx="8" ry="4.5" fill="${c}"/>
-        <g class="m-head">
-          <path d="M26 20c-4-8-3-13 0-15 3 4 7 9 11 10z" fill="${c}"/>
-          <path d="M60 20c4-8 3-13 0-15-3 4-7 9-11 10z" fill="${c}"/>
-          <ellipse cx="43" cy="40" rx="29" ry="27" fill="${c}"/>
-          <ellipse class="m-eye" cx="31" cy="39" rx="6.4" ry="7.4" fill="${on}"/>
-          <ellipse class="m-eye" cx="55" cy="39" rx="6.4" ry="7.4" fill="${on}"/>
-          <circle cx="33.2" cy="36.4" r="2.2" fill="${c}"/>
-          <circle cx="57.2" cy="36.4" r="2.2" fill="${c}"/>
-          <ellipse cx="20" cy="52" rx="6" ry="4" fill="${on}" opacity=".3"/>
-          <ellipse cx="66" cy="52" rx="6" ry="4" fill="${on}" opacity=".3"/>
-          <path d="M37 54q6 5 12 0" stroke="${on}" stroke-width="2.4" fill="none" stroke-linecap="round"/>
-          <rect x="40.4" y="57" width="5.2" height="7" rx="2.2" fill="${on}"/>
+          <path d="M24 34c-3-15-3-25 0-28 6 5 15 12 22 15z" fill="${c}"/>
+          <path d="M76 34c3-15 3-25 0-28-6 5-15 12-22 15z" fill="${c}"/>
+          <ellipse cx="50" cy="45" rx="27" ry="25" fill="${c}"/>
+          <path d="M50 26c13 0 22 9 22 20s-9 18-22 18-22-7-22-18 9-20 22-20z" fill="${on}" opacity=".18"/>
+          <ellipse class="m-eye" cx="38" cy="43" rx="7.4" ry="8" fill="${on}"/>
+          <ellipse class="m-eye" cx="62" cy="43" rx="7.4" ry="8" fill="${on}"/>
+          <circle cx="40.2" cy="40.6" r="2.4" fill="${c}"/>
+          <circle cx="64.2" cy="40.6" r="2.4" fill="${c}"/>
+          <ellipse cx="27" cy="55" rx="5.6" ry="3.8" fill="${on}" opacity=".3"/>
+          <ellipse cx="73" cy="55" rx="5.6" ry="3.8" fill="${on}" opacity=".3"/>
+          <path d="M50 54l-3.2 3.2h6.4z" fill="${on}"/>
+          <path d="M44 60q3 3.6 6 0 3 3.6 6 0" stroke="${on}" stroke-width="2"
+                fill="none" stroke-linecap="round"/>
+          <path d="M30 50h6M30 54h5M70 50h-6M70 54h-5" stroke="${on}" stroke-width="1.3"
+                stroke-linecap="round" opacity=".4"/>
         </g>
       </g>
     </svg>`},
 
-  english:{name:'Coco', kind:'鸚鵡', svg:(c,on)=>`
+  tariff:{name:'碼碼', kind:'波斯貓', svg:(c,on)=>`
     <svg viewBox="0 0 100 100" aria-hidden="true">
       <g class="m-body">
-        <path class="m-tail" d="M58 88c6 8 9 14 8 19-7-3-13-9-17-16z" fill="${c}"/>
-        <ellipse cx="50" cy="70" rx="27" ry="25" fill="${c}"/>
-        <path d="M68 62c8 6 11 16 8 25-4-7-9-12-14-14z" fill="${on}" opacity=".24"/>
-        <ellipse cx="40" cy="93" rx="8" ry="4.5" fill="${c}"/>
-        <ellipse cx="60" cy="93" rx="8" ry="4.5" fill="${c}"/>
+        <path class="m-tail" d="M74 84c14-3 20-14 16-26-3 8-9 13-17 14z" fill="${c}"/>
+        <ellipse cx="50" cy="78" rx="26" ry="21" fill="${c}"/>
+        <ellipse cx="39" cy="95" rx="9" ry="5" fill="${c}"/>
+        <ellipse cx="61" cy="95" rx="9" ry="5" fill="${c}"/>
         <g class="m-head">
-          <path d="M50 11c-4-6-4-11-1-14 2 6 5 10 9 11z" fill="${c}"/>
-          <path d="M41 14c-5-6-6-11-4-14 2 6 6 10 10 11z" fill="${c}"/>
-          <path d="M59 13c5-6 7-10 6-13-3 5-7 8-11 9z" fill="${c}"/>
-          <ellipse cx="50" cy="40" rx="28" ry="26" fill="${c}"/>
-          <ellipse class="m-eye" cx="38" cy="37" rx="6.6" ry="7.6" fill="${on}"/>
-          <ellipse class="m-eye" cx="62" cy="37" rx="6.6" ry="7.6" fill="${on}"/>
-          <circle cx="40.2" cy="34.4" r="2.2" fill="${c}"/>
-          <circle cx="64.2" cy="34.4" r="2.2" fill="${c}"/>
-          <path d="M50 47c4 0 6.4 2.2 6.4 4.6 0 3.4-2.8 6.2-6.4 7.4-3.6-1.2-6.4-4-6.4-7.4C43.6 49.2 46 47 50 47z" fill="${on}"/>
-          <path d="M50 51.5c1.6 0 2.4.8 2.4 1.6s-.8 1.6-2.4 1.6-2.4-.8-2.4-1.6.8-1.6 2.4-1.6z" fill="${c}" opacity=".38"/>
-          <ellipse cx="24" cy="50" rx="6" ry="4" fill="${on}" opacity=".28"/>
-          <ellipse cx="76" cy="50" rx="6" ry="4" fill="${on}" opacity=".28"/>
+          <path d="M34 20c-2-6-1-9 1-10 2 3 5 6 8 7zM66 20c2-6 1-9-1-10-2 3-5 6-8 7z" fill="${c}"/>
+          <path d="${furRing(50,42,32,30,26,.055)}" fill="${c}"/>
+          <ellipse class="m-eye" cx="37" cy="41" rx="8.2" ry="8.6" fill="${on}"/>
+          <ellipse class="m-eye" cx="63" cy="41" rx="8.2" ry="8.6" fill="${on}"/>
+          <circle cx="39.4" cy="38.4" r="2.7" fill="${c}"/>
+          <circle cx="65.4" cy="38.4" r="2.7" fill="${c}"/>
+          <ellipse cx="23" cy="54" rx="6.5" ry="4.4" fill="${on}" opacity=".3"/>
+          <ellipse cx="77" cy="54" rx="6.5" ry="4.4" fill="${on}" opacity=".3"/>
+          <path d="M50 50l-3.6 3.4h7.2z" fill="${on}"/>
+          <path d="M43 56.5q3.5 4 7 0 3.5 4 7 0" stroke="${on}" stroke-width="2.3"
+                fill="none" stroke-linecap="round"/>
+          <path d="M27 46h7M27 50h6M73 46h-7M73 50h-6" stroke="${on}" stroke-width="1.4"
+                stroke-linecap="round" opacity=".38"/>
+        </g>
+      </g>
+    </svg>`},
+
+  english:{name:'Coco', kind:'緬因貓', svg:(c,on)=>`
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <g class="m-body">
+        <path class="m-tail" d="M72 88c15-2 24-14 21-28-3 10-11 16-21 16z" fill="${c}"/>
+        <ellipse cx="50" cy="78" rx="25" ry="20" fill="${c}"/>
+        <path d="${furRing(50,62,29,14,22,.09)}" fill="${c}"/>
+        <ellipse cx="39" cy="95" rx="8.5" ry="4.8" fill="${c}"/>
+        <ellipse cx="61" cy="95" rx="8.5" ry="4.8" fill="${c}"/>
+        <g class="m-head">
+          <path d="M25 30c-4-14-4-22-1-24 5 5 12 12 18 15zM30 8l-2-7 5 5z" fill="${c}"/>
+          <path d="M75 30c4-14 4-22 1-24-5 5-12 12-18 15zM70 8l2-7-5 5z" fill="${c}"/>
+          <ellipse cx="50" cy="42" rx="28" ry="26" fill="${c}"/>
+          <ellipse class="m-eye" cx="38" cy="41" rx="7.6" ry="8.2" fill="${on}"/>
+          <ellipse class="m-eye" cx="62" cy="41" rx="7.6" ry="8.2" fill="${on}"/>
+          <circle cx="40.2" cy="38.4" r="2.5" fill="${c}"/>
+          <circle cx="64.2" cy="38.4" r="2.5" fill="${c}"/>
+          <ellipse cx="25" cy="54" rx="6" ry="4" fill="${on}" opacity=".3"/>
+          <ellipse cx="75" cy="54" rx="6" ry="4" fill="${on}" opacity=".3"/>
+          <path d="M50 51l-3.4 3.3h6.8z" fill="${on}"/>
+          <path d="M43.5 57.5q3.3 3.8 6.5 0 3.2 3.8 6.5 0" stroke="${on}" stroke-width="2.2"
+                fill="none" stroke-linecap="round"/>
+          <path d="M28 47h7M28 51h6M72 47h-7M72 51h-6" stroke="${on}" stroke-width="1.4"
+                stroke-linecap="round" opacity=".4"/>
         </g>
       </g>
     </svg>`}
