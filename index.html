@@ -1207,7 +1207,34 @@ function fitContrast(hex, bgHex, target){
   }
   return best;
 }
-/* 主色：丟掉太黑太白太灰的像素，按色相分桶，取最大那桶的中位數 */
+/* HSL 互轉，用來把顏色調鮮豔或分開明度 */
+function rgb2hsl(r,g,b){
+  r/=255; g/=255; b/=255;
+  const mx=Math.max(r,g,b), mn=Math.min(r,g,b), l=(mx+mn)/2;
+  if(mx===mn) return [0,0,l];
+  const d=mx-mn, sat = l>0.5 ? d/(2-mx-mn) : d/(mx+mn);
+  let h;
+  if(mx===r)      h=((g-b)/d+(g<b?6:0));
+  else if(mx===g) h=(b-r)/d+2;
+  else            h=(r-g)/d+4;
+  return [h*60, sat, l];
+}
+function hsl2hex(h,sat,l){
+  h=((h%360)+360)%360; sat=Math.max(0,Math.min(1,sat)); l=Math.max(0,Math.min(1,l));
+  const c=(1-Math.abs(2*l-1))*sat, x=c*(1-Math.abs((h/60)%2-1)), m=l-c/2;
+  let r,g,b;
+  if(h<60)       [r,g,b]=[c,x,0];
+  else if(h<120) [r,g,b]=[x,c,0];
+  else if(h<180) [r,g,b]=[0,c,x];
+  else if(h<240) [r,g,b]=[0,x,c];
+  else if(h<300) [r,g,b]=[x,0,c];
+  else           [r,g,b]=[c,0,x];
+  return rgbHex((r+m)*255,(g+m)*255,(b+m)*255);
+}
+/* 主色：**不是取面積最大的色相**。
+   面積最大的通常是絨毛本體，這批公仔的毛色都是米棕，四科抽出來會變成一片土色，
+   船席就分不出來了——而分得出來正是塗裝色存在的理由。
+   改成用「面積 × 鮮豔度」計分，讓紅袍、星光、小花這種有辨識度的部分勝出。 */
 function dominantColor(src){
   return new Promise(res=>{
     const im=new Image();
@@ -1232,11 +1259,25 @@ function dominantColor(src){
           const k=Math.round(h*60/14);                     // 約 26 個色相桶
           (buckets[k]=buckets[k]||[]).push([r,g,b]);
         }
-        const all=Object.values(buckets).sort((a,b)=>b.length-a.length);
-        const best=all[0];
-        if(!best || best.length<10) return res(null);
+        const score = arr => {
+          if(arr.length < 10) return -1;
+          let sat=0;
+          for(const p of arr){
+            const mx=Math.max(p[0],p[1],p[2]), mn=Math.min(p[0],p[1],p[2]);
+            sat += mx? (mx-mn)/mx : 0;
+          }
+          sat /= arr.length;
+          return arr.length * Math.pow(sat, 1.6);      // 鮮豔度加權，壓過純面積
+        };
+        const all=Object.values(buckets).map(a=>[score(a),a]).sort((x,y)=>y[0]-x[0]);
+        if(!all.length || all[0][0] <= 0) return res(null);
+        const best=all[0][1];
         const med=i=>{ const v=best.map(p=>p[i]).sort((a,b)=>a-b); return v[v.length>>1]; };
-        res(rgbHex(med(0),med(1),med(2)));
+        let hex = rgbHex(med(0),med(1),med(2));
+        // 太灰的顏色當塗裝色會糊成一片，拉一個飽和度下限
+        const [h,sat,l] = rgb2hsl.apply(null, hexRGB(hex));
+        if(sat < 0.38) hex = hsl2hex(h, 0.48, Math.min(0.62, Math.max(0.38, l)));
+        res(hex);
       }catch(e){ res(null); }
     };
     im.src=src;
@@ -1250,8 +1291,27 @@ async function refreshPicColor(key){
   if(c){ S.picColor[key]=c; save(); }
   return c;
 }
+/* 四張圖萬一色相還是接近（例如都是米棕），用明度把它們拉開。
+   刻意不動色相——那會變成瞎編的顏色；動明度還看得出是同一張圖的色。 */
+function spreadPicColors(){
+  const ks = SUBJECTS.map(x=>x.key).filter(k=>(S.picColor||{})[k]);
+  const hsl = {};
+  ks.forEach(k=>{ hsl[k] = rgb2hsl.apply(null, hexRGB(S.picColor[k])); });
+  for(let i=1;i<ks.length;i++){
+    for(let j=0;j<i;j++){
+      const a=hsl[ks[i]], b=hsl[ks[j]];
+      let dh=Math.abs(a[0]-b[0]); if(dh>180) dh=360-dh;
+      if(dh < 30 && Math.abs(a[2]-b[2]) < 0.18){
+        a[2] = b[2] > 0.5 ? Math.max(0.26, b[2]-0.22) : Math.min(0.72, b[2]+0.22);
+      }
+    }
+  }
+  ks.forEach(k=>{ S.picColor[k] = hsl2hex(hsl[k][0], hsl[k][1], hsl[k][2]); });
+  save();
+}
 async function refreshAllPicColors(){
   for(const s of SUBJECTS) await refreshPicColor(s.key);
+  spreadPicColors();
   applyPrefs();
 }
 /* 套用：沒有圖的科目就用內建塗裝色 */
