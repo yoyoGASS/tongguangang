@@ -40,7 +40,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
   --tariff:#C8006E;   --tariff-on:#FFFFFF;
   --english:#E08A00;  --english-on:#1A1205;
   /* -lit：同一支油漆在場燈下的樣子，只用於深色地面上的圖形，不用於色場底 */
-  --practice-lit:#0E7F47; --law-lit:#1D74AE; --tariff-lit:#C8006E; --english-lit:#E08A00;
+  --practice-lit:#0E7F47; --law-lit:#1D74AE; --tariff-lit:#C8006E; --english-lit:#B06A00;
 
   /* 通道燈 */
   --c1:#0C7040; --c2:#C67A00; --c3:#C62828;
@@ -1346,123 +1346,212 @@ function applyPicPalette(){
 
    兩個顏色不能互換：c ＝ 本體、on ＝ 挖空／背景色。
    兩種脈絡：onLivery（色場上→本體反白）、onYard（地面上→本體用 -lit 色）。 */
-/* 蓬鬆的毛邊輪廓：把橢圓拆成鋸齒。波斯貓的臉與緬因貓的鬃毛用它。 */
-function furRing(cx, cy, rx, ry, n, amp){
+/* ─── 夥伴：四隻品種貓（寫實版）─────────────────────────────
+   前一版是扁平雙色的可愛風。這一版要「更真實」，但夥伴仍然只有兩個顏色可用
+   （c ＝ 本體、on ＝ 挖空／背景色），因為要同時在塗裝色場與地面上成立。
+
+   突破的方法是**從那兩色推出更多階**：
+     mix(x)  ＝ 往 on 推 x%，用來畫毛色斑塊、耳內、口鼻、眼白
+     sh(a)   ＝ 黑色低透明度，**兩種脈絡下都是變暗**，所以能當陰影
+     hi(a)   ＝ 白色低透明度，兩種脈絡下都是變亮，所以能當高光
+   注意 c 與 on 的明暗關係會翻轉（色場上 c 是反白、地面上 c 是彩色），
+   所以「往 on 推」只能當作「退到背景去」，不能假設它是變亮或變暗。
+
+   寫實感來自四件事，缺一不可：
+     1. 比例——頭不能佔一半，身體要有長度與坐姿
+     2. 毛流——輪廓的簇毛與身上的短毛筆觸
+     3. 眼睛——杏眼、直立瞳孔、虹膜環、高光
+     4. 明暗——下巴與腹部的陰影、頭頂與背脊的高光 */
+const mix = (c, on, x) => `color-mix(in srgb, ${on} ${x}%, ${c})`;
+const sh  = a => `rgba(0,0,0,${a})`;
+const hi  = a => `rgba(255,255,255,${a})`;
+
+/* 長毛的輪廓。第一版用往外扎的直線，結果變成海膽——
+   真實的長毛邊緣是**柔和的波浪**，毛流的細節要畫在邊緣「內側」，不是往外戳。 */
+function furEdge(cx, cy, rx, ry, n, amp){
   let d = '';
-  for(let i=0;i<n*2;i++){
-    const a = (i/(n*2))*Math.PI*2 - Math.PI/2;
-    const k = (i%2) ? 1 : 1+amp;
-    d += (i?'L':'M') + (cx+Math.cos(a)*rx*k).toFixed(1) + ' ' + (cy+Math.sin(a)*ry*k).toFixed(1);
+  for(let i=0;i<n;i++){
+    const a = (i/n)*Math.PI*2 - Math.PI/2;
+    const k = 1 + amp*Math.sin(i*2.7)*(0.6+0.4*Math.cos(i*1.3));
+    const x = cx+Math.cos(a)*rx*k, y = cy+Math.sin(a)*ry*k;
+    d += (i?'L':'M') + x.toFixed(1) + ' ' + y.toFixed(1);
   }
   return d + 'Z';
 }
+/* 內側毛流：沿著邊緣內側畫短斜線，讓表面有方向感 */
+function furStrokes(cx, cy, r, from, to, n, len, colour, w){
+  let d = '';
+  for(let i=0;i<n;i++){
+    const a = from + (to-from)*(i/(n-1));
+    const tilt = a + 0.22;
+    const j = 0.55 + 0.45*Math.abs(Math.sin(i*2.4));   // 等長會變成刮痕
+    const x1 = cx+Math.cos(a)*r*0.97,          y1 = cy+Math.sin(a)*r*0.97;
+    const x2 = cx+Math.cos(tilt)*(r-len*j),    y2 = cy+Math.sin(tilt)*(r-len*j);
+    d += `M${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}`;
+  }
+  return `<path d="${d}" stroke="${colour}" stroke-width="${w}" stroke-linecap="round" fill="none"/>`;
+}
+/* 杏眼＋直立瞳孔。貓眼是辨識度最高的部位，值得多花幾個形狀 */
+function catEye(x, y, rx, ry, c, on, flip){
+  const d = flip ? -1 : 1;
+  return `
+    <g class="m-eye">
+      <path d="M${x-rx} ${y}q${rx*0.5} ${-ry*1.25} ${rx*2} 0q${-rx*0.5} ${ry*1.15} ${-rx*2} 0z"
+            fill="${mix(c,on,86)}"/>
+      <ellipse cx="${x+rx*0.06*d}" cy="${y}" rx="${rx*0.78}" ry="${ry*0.92}" fill="${mix(c,on,54)}"/>
+      <ellipse cx="${x+rx*0.06*d}" cy="${y}" rx="${rx*0.2}" ry="${ry*0.86}" fill="${sh(.82)}"/>
+      <ellipse cx="${x-rx*0.34}" cy="${y-ry*0.42}" rx="${rx*0.2}" ry="${ry*0.26}" fill="${hi(.85)}"/>
+      <path d="M${x-rx} ${y}q${rx*0.5} ${-ry*1.25} ${rx*2} 0" stroke="${sh(.24)}"
+            stroke-width="1.1" fill="none"/>
+    </g>`;
+}
+/* 鼻子＋人中＋嘴，貓的下半臉 */
+function catMuzzle(cx, y, s, c, on){
+  return `
+    <path d="M${cx-3.1*s} ${y}q3.1 ${-2.2*s} ${6.2*s} 0q${-1.2*s} ${3.2*s} ${-3.1*s} ${3.6*s}q${-1.9*s} ${-0.4*s} ${-3.1*s} ${-3.6*s}z"
+          fill="${mix(c,on,62)}"/>
+    <path d="M${cx} ${y+3.4*s}v${2.6*s}" stroke="${sh(.3)}" stroke-width="${1.1*s}" stroke-linecap="round"/>
+    <path d="M${cx} ${y+6*s}q${-3.4*s} ${2.8*s} ${-6*s} ${-0.4*s}M${cx} ${y+6*s}q${3.4*s} ${2.8*s} ${6*s} ${-0.4*s}"
+          stroke="${sh(.34)}" stroke-width="${1.5*s}" fill="none" stroke-linecap="round"/>`;
+}
+const whiskers = (cx, y, c, on) => `
+  <g stroke="${hi(.5)}" stroke-width="1.05" stroke-linecap="round" fill="none">
+    <path d="M${cx-7} ${y}q-9 -2 -14 -4M${cx-7} ${y+3}q-9 1 -14 1M${cx-7} ${y+6}q-9 3 -13 5"/>
+    <path d="M${cx+7} ${y}q9 -2 14 -4M${cx+7} ${y+3}q9 1 14 1M${cx+7} ${y+6}q9 3 13 5"/>
+  </g>`;
 
 const MASCOTS = {
+  /* 摺耳貓：耳朵往前下折，圓臉、圓身、短毛 */
   practice:{name:'阿關', kind:'摺耳貓', svg:(c,on)=>`
     <svg viewBox="0 0 100 100" aria-hidden="true">
+      <ellipse cx="50" cy="95" rx="27" ry="4.6" fill="${sh(.16)}"/>
       <g class="m-body">
-        <ellipse cx="50" cy="76" rx="26" ry="22" fill="${c}"/>
-        <path class="m-tail" d="M74 82c11-1 17-9 16-19-2 8-8 12-16 12z" fill="${c}"/>
-        <ellipse cx="38" cy="95" rx="9" ry="5" fill="${c}"/>
-        <ellipse cx="62" cy="95" rx="9" ry="5" fill="${c}"/>
+        <path class="m-tail" d="M74 88c13 1 20-6 20-16 0-6-3-10-7-10-3 0-5 2-5 5 0 2 1 4 3 4 1 0 2-1 2-2 1 4-1 8-5 9-3 1-6 1-8 0z" fill="${c}"/>
+        <path d="M50 46c15 0 24 12 24 28 0 10-3 16-8 18H34c-5-2-8-8-8-18 0-16 9-28 24-28z" fill="${c}"/>
+        <path d="M50 62c8 0 13 8 13 18 0 5-1 9-3 12H40c-2-3-3-7-3-12 0-10 5-18 13-18z" fill="${mix(c,on,26)}"/>
+        <path d="M26 74c0 10 3 16 8 18h6c-6-4-10-11-11-20z" fill="${sh(.13)}"/>
+        <g fill="none" stroke="${hi(.16)}" stroke-width="1.4" stroke-linecap="round">
+          <path d="M40 54q-3 6-4 12M50 51q-2 7-2 13M60 54q3 6 4 12"/>
+        </g>
+        <ellipse cx="39" cy="91" rx="8" ry="5" fill="${mix(c,on,22)}"/>
+        <ellipse cx="61" cy="91" rx="8" ry="5" fill="${mix(c,on,22)}"/>
+        <path d="M35 91h8M57 91h8" stroke="${sh(.2)}" stroke-width="1" stroke-linecap="round"/>
         <g class="m-head">
-          <ellipse cx="50" cy="42" rx="30" ry="28" fill="${c}"/>
-          <path d="M24 25c9-4 15-2 17 4 1 5-3 9-9 10-6 1-10-3-10-8 0-3 1-5 2-6z" fill="${c}"/>
-          <path d="M76 25c-9-4-15-2-17 4-1 5 3 9 9 10 6 1 10-3 10-8 0-3-1-5-2-6z" fill="${c}"/>
-          <path d="M27 29c6-2 10-1 11 3" stroke="${on}" stroke-width="2" fill="none"
-                stroke-linecap="round" opacity=".45"/>
-          <path d="M73 29c-6-2-10-1-11 3" stroke="${on}" stroke-width="2" fill="none"
-                stroke-linecap="round" opacity=".45"/>
-          <ellipse class="m-eye" cx="37" cy="41" rx="7.6" ry="8.4" fill="${on}"/>
-          <ellipse class="m-eye" cx="63" cy="41" rx="7.6" ry="8.4" fill="${on}"/>
-          <circle cx="39.4" cy="38.4" r="2.5" fill="${c}"/>
-          <circle cx="65.4" cy="38.4" r="2.5" fill="${c}"/>
-          <ellipse cx="24" cy="55" rx="6.5" ry="4.2" fill="${on}" opacity=".3"/>
-          <ellipse cx="76" cy="55" rx="6.5" ry="4.2" fill="${on}" opacity=".3"/>
-          <path d="M50 52l-3.4 3.4h6.8z" fill="${on}"/>
-          <path d="M43.5 58q3.3 4 6.5 0 3.2 4 6.5 0" stroke="${on}" stroke-width="2.2"
-                fill="none" stroke-linecap="round"/>
-          <path d="M28 47h7M28 51h6M72 47h-7M72 51h-6" stroke="${on}" stroke-width="1.4"
-                stroke-linecap="round" opacity=".4"/>
+          <ellipse cx="50" cy="40" rx="29" ry="27" fill="${c}"/>
+          <path d="M30 14C24 15 20 20 20.5 26 21 31 24 35 27 35 34 34 40 30 43 25 41 18 36 13 30 14Z" fill="${mix(c,on,14)}"/>
+          <path d="M70 14C76 15 80 20 79.5 26 79 31 76 35 73 35 66 34 60 30 57 25 59 18 64 13 70 14Z" fill="${mix(c,on,14)}"/>
+          <path d="M28.5 33C33 32 37.5 29 40.5 25.5 39.5 30.5 34 34 28.5 33Z" fill="${mix(c,on,48)}"/>
+          <path d="M71.5 33C67 32 62.5 29 59.5 25.5 60.5 30.5 66 34 71.5 33Z" fill="${mix(c,on,48)}"/>
+          <g fill="none" stroke="${sh(.24)}" stroke-width="1.6" stroke-linecap="round">
+            <path d="M31 16.5C25.5 18 22.5 22 23 27M69 16.5C74.5 18 77.5 22 77 27"/>
+          </g>
+          <ellipse cx="50" cy="24" rx="17" ry="8" fill="${hi(.13)}"/>
+          <path d="M23 46q4 14 15 19-12-2-17-12z" fill="${sh(.12)}"/>
+          <ellipse cx="50" cy="52" rx="16" ry="11" fill="${mix(c,on,30)}"/>
+          ${catEye(37,39,8.4,6.6,c,on,false)}
+          ${catEye(63,39,8.4,6.6,c,on,true)}
+          ${catMuzzle(50,49,1,c,on)}
+          ${whiskers(50,50,c,on)}
+          <ellipse cx="25" cy="47" rx="6" ry="3.6" fill="${hi(.14)}"/>
+          <ellipse cx="75" cy="47" rx="6" ry="3.6" fill="${hi(.14)}"/>
         </g>
       </g>
     </svg>`},
 
+  /* 暹羅貓：最大的直立三角耳、瘦長臉、四肢與臉的深色重點 */
   law:{name:'律律', kind:'暹羅貓', svg:(c,on)=>`
     <svg viewBox="0 0 100 100" aria-hidden="true">
+      <ellipse cx="50" cy="95" rx="25" ry="4.4" fill="${sh(.16)}"/>
       <g class="m-body">
-        <ellipse cx="50" cy="76" rx="23" ry="21" fill="${c}"/>
-        <path class="m-tail" d="M71 84c13 2 21-6 22-18-4 9-12 13-22 11z" fill="${c}"/>
-        <ellipse cx="39" cy="94" rx="8" ry="4.6" fill="${c}"/>
-        <ellipse cx="61" cy="94" rx="8" ry="4.6" fill="${c}"/>
+        <path class="m-tail" d="M72 90c14-2 22-12 22-24 0-6-3-10-7-10-3 0-5 2-5 5 0 2 1 3 3 3 1 0 2 0 2-1 1 5-2 11-7 14-3 2-6 3-9 3z" fill="${sh(.34)}"/>
+        <path d="M50 50c13 0 21 11 21 26 0 9-2 14-6 16H35c-4-2-6-7-6-16 0-15 8-26 21-26z" fill="${c}"/>
+        <path d="M50 64c7 0 12 7 12 16 0 5-1 9-2 12H40c-1-3-2-7-2-12 0-9 5-16 12-16z" fill="${mix(c,on,24)}"/>
+        <path d="M29 76c0 9 2 14 6 16h5c-5-4-8-10-9-18z" fill="${sh(.14)}"/>
+        <ellipse cx="39" cy="91" rx="7.4" ry="4.8" fill="${sh(.3)}"/>
+        <ellipse cx="61" cy="91" rx="7.4" ry="4.8" fill="${sh(.3)}"/>
         <g class="m-head">
-          <path d="M24 34c-3-15-3-25 0-28 6 5 15 12 22 15z" fill="${c}"/>
-          <path d="M76 34c3-15 3-25 0-28-6 5-15 12-22 15z" fill="${c}"/>
-          <ellipse cx="50" cy="45" rx="27" ry="25" fill="${c}"/>
-          <path d="M50 26c13 0 22 9 22 20s-9 18-22 18-22-7-22-18 9-20 22-20z" fill="${on}" opacity=".18"/>
-          <ellipse class="m-eye" cx="38" cy="43" rx="7.4" ry="8" fill="${on}"/>
-          <ellipse class="m-eye" cx="62" cy="43" rx="7.4" ry="8" fill="${on}"/>
-          <circle cx="40.2" cy="40.6" r="2.4" fill="${c}"/>
-          <circle cx="64.2" cy="40.6" r="2.4" fill="${c}"/>
-          <ellipse cx="27" cy="55" rx="5.6" ry="3.8" fill="${on}" opacity=".3"/>
-          <ellipse cx="73" cy="55" rx="5.6" ry="3.8" fill="${on}" opacity=".3"/>
-          <path d="M50 54l-3.2 3.2h6.4z" fill="${on}"/>
-          <path d="M44 60q3 3.6 6 0 3 3.6 6 0" stroke="${on}" stroke-width="2"
-                fill="none" stroke-linecap="round"/>
-          <path d="M30 50h6M30 54h5M70 50h-6M70 54h-5" stroke="${on}" stroke-width="1.3"
-                stroke-linecap="round" opacity=".4"/>
+          <path d="M22 36c-4-18-4-29 0-32 7 6 17 15 24 18z" fill="${c}"/>
+          <path d="M78 36c4-18 4-29 0-32-7 6-17 15-24 18z" fill="${c}"/>
+          <path d="M25 33c-3-13-3-21 0-23 5 5 12 11 17 13z" fill="${mix(c,on,50)}"/>
+          <path d="M75 33c3-13 3-21 0-23-5 5-12 11-17 13z" fill="${mix(c,on,50)}"/>
+          <ellipse cx="50" cy="44" rx="26" ry="25" fill="${c}"/>
+          <path d="M50 27c12 0 20 8 20 19 0 10-8 17-20 17s-20-7-20-17c0-11 8-19 20-19z" fill="${sh(.3)}"/>
+          <ellipse cx="50" cy="28" rx="15" ry="7" fill="${hi(.12)}"/>
+          <path d="M24 48q4 13 14 18-11-2-16-11z" fill="${sh(.12)}"/>
+          ${catEye(38,42,8,6.2,c,on,false)}
+          ${catEye(62,42,8,6.2,c,on,true)}
+          ${catMuzzle(50,52,0.95,c,on)}
+          ${whiskers(50,53,c,on)}
         </g>
       </g>
     </svg>`},
 
+  /* 波斯貓：扁臉、耳朵極小、全身長毛，輪廓整圈都是簇毛 */
   tariff:{name:'碼碼', kind:'波斯貓', svg:(c,on)=>`
     <svg viewBox="0 0 100 100" aria-hidden="true">
+      <ellipse cx="50" cy="95" rx="28" ry="4.8" fill="${sh(.16)}"/>
       <g class="m-body">
-        <path class="m-tail" d="M74 84c14-3 20-14 16-26-3 8-9 13-17 14z" fill="${c}"/>
-        <ellipse cx="50" cy="78" rx="26" ry="21" fill="${c}"/>
-        <ellipse cx="39" cy="95" rx="9" ry="5" fill="${c}"/>
-        <ellipse cx="61" cy="95" rx="9" ry="5" fill="${c}"/>
+        <path class="m-tail" d="M72 86c14-1 22-10 22-22 0-7-4-12-9-12-4 0-6 3-6 6 0 3 2 5 4 5 1 0 2-1 2-2 1 5-2 11-7 14-2 2-4 3-6 3z" fill="${c}"/>
+        <path d="${furEdge(50,74,28,25,40,.045)}" fill="${c}"/>
+        <path d="M50 48c17 0 27 13 27 29 0 9-3 15-8 17H31c-5-2-8-8-8-17 0-16 10-29 27-29z" fill="${c}"/>
+        ${furStrokes(50,74,26,Math.PI*0.12,Math.PI*0.88,14,7,hi(.13),1.8)}
+        <path d="M50 62c10 0 16 9 16 19 0 5-1 10-3 13H37c-2-3-3-8-3-13 0-10 6-19 16-19z" fill="${mix(c,on,28)}"/>
+        <path d="M23 77c0 9 3 15 8 17h6c-7-4-12-11-13-21z" fill="${sh(.13)}"/>
+        <ellipse cx="38" cy="91" rx="8.4" ry="5.2" fill="${mix(c,on,22)}"/>
+        <ellipse cx="62" cy="91" rx="8.4" ry="5.2" fill="${mix(c,on,22)}"/>
         <g class="m-head">
-          <path d="M34 20c-2-6-1-9 1-10 2 3 5 6 8 7zM66 20c2-6 1-9-1-10-2 3-5 6-8 7z" fill="${c}"/>
-          <path d="${furRing(50,42,32,30,26,.055)}" fill="${c}"/>
-          <ellipse class="m-eye" cx="37" cy="41" rx="8.2" ry="8.6" fill="${on}"/>
-          <ellipse class="m-eye" cx="63" cy="41" rx="8.2" ry="8.6" fill="${on}"/>
-          <circle cx="39.4" cy="38.4" r="2.7" fill="${c}"/>
-          <circle cx="65.4" cy="38.4" r="2.7" fill="${c}"/>
-          <ellipse cx="23" cy="54" rx="6.5" ry="4.4" fill="${on}" opacity=".3"/>
-          <ellipse cx="77" cy="54" rx="6.5" ry="4.4" fill="${on}" opacity=".3"/>
-          <path d="M50 50l-3.6 3.4h7.2z" fill="${on}"/>
-          <path d="M43 56.5q3.5 4 7 0 3.5 4 7 0" stroke="${on}" stroke-width="2.3"
-                fill="none" stroke-linecap="round"/>
-          <path d="M27 46h7M27 50h6M73 46h-7M73 50h-6" stroke="${on}" stroke-width="1.4"
-                stroke-linecap="round" opacity=".38"/>
+          <path d="${furEdge(50,40,31,30,46,.04)}" fill="${c}"/>
+          ${furStrokes(50,40,29,-Math.PI*0.95,-Math.PI*0.05,16,7,hi(.14),1.7)}
+          ${furStrokes(50,40,29,Math.PI*0.12,Math.PI*0.88,14,6,sh(.09),1.7)}
+          <path d="M23 25C22 18 23.5 12.5 26.5 12.5 30 13.5 34 17 36.5 20.5Z" fill="${c}"/>
+          <path d="M77 25C78 18 76.5 12.5 73.5 12.5 70 13.5 66 17 63.5 20.5Z" fill="${c}"/>
+          <path d="M26 22C25 17.5 26 15 27.2 15 29 16 31 18 32.2 20Z" fill="${mix(c,on,46)}"/>
+          <path d="M74 22C75 17.5 74 15 72.8 15 71 16 69 18 67.8 20Z" fill="${mix(c,on,46)}"/>
+          <ellipse cx="50" cy="22" rx="18" ry="8" fill="${hi(.13)}"/>
+          <path d="M21 46q5 15 17 20-13-2-19-13z" fill="${sh(.12)}"/>
+          <ellipse cx="50" cy="53" rx="19" ry="12" fill="${mix(c,on,30)}"/>
+          ${catEye(36,40,8.8,7,c,on,false)}
+          ${catEye(64,40,8.8,7,c,on,true)}
+          ${catMuzzle(50,50,1.05,c,on)}
+          ${whiskers(50,51,c,on)}
         </g>
       </g>
     </svg>`},
 
+  /* 緬因貓：高聳的簇毛耳、頸部鬃毛、虎斑、大體型 */
   english:{name:'Coco', kind:'緬因貓', svg:(c,on)=>`
     <svg viewBox="0 0 100 100" aria-hidden="true">
+      <ellipse cx="50" cy="95" rx="27" ry="4.6" fill="${sh(.16)}"/>
       <g class="m-body">
-        <path class="m-tail" d="M72 88c15-2 24-14 21-28-3 10-11 16-21 16z" fill="${c}"/>
-        <ellipse cx="50" cy="78" rx="25" ry="20" fill="${c}"/>
-        <path d="${furRing(50,62,29,14,22,.09)}" fill="${c}"/>
-        <ellipse cx="39" cy="95" rx="8.5" ry="4.8" fill="${c}"/>
-        <ellipse cx="61" cy="95" rx="8.5" ry="4.8" fill="${c}"/>
+        <path class="m-tail" d="M74 88c15-2 23-13 22-26-1-7-5-11-9-10-4 0-6 3-5 7 0 3 2 4 4 4 1 0 2-1 2-2 2 6-2 13-7 16-2 2-5 3-7 3z" fill="${c}"/>
+        <path d="M50 50c15 0 25 12 25 28 0 9-3 15-8 17H33c-5-2-8-8-8-17 0-16 10-28 25-28z" fill="${c}"/>
+        <path d="${furEdge(50,60,26,15,34,.075)}" fill="${c}"/>
+        <path d="M50 52c10 0 17 6 17 12 0 5-8 9-17 9s-17-4-17-9c0-6 7-12 17-12z" fill="${mix(c,on,44)}"/>
+        ${furStrokes(50,60,24,Math.PI*0.1,Math.PI*0.9,13,7,hi(.15),1.8)}
+        <g stroke="${sh(.13)}" stroke-width="2.4" stroke-linecap="round" fill="none">
+          <path d="M36 74q6 3 0 7M64 74q-6 3 0 7M38 84q6 3 0 6M62 84q-6 3 0 6"/>
+        </g>
+        <path d="M25 78c0 9 3 15 8 17h6c-7-4-13-11-14-21z" fill="${sh(.13)}"/>
+        <ellipse cx="38" cy="91" rx="8.2" ry="5" fill="${mix(c,on,22)}"/>
+        <ellipse cx="62" cy="91" rx="8.2" ry="5" fill="${mix(c,on,22)}"/>
         <g class="m-head">
-          <path d="M25 30c-4-14-4-22-1-24 5 5 12 12 18 15zM30 8l-2-7 5 5z" fill="${c}"/>
-          <path d="M75 30c4-14 4-22 1-24-5 5-12 12-18 15zM70 8l2-7-5 5z" fill="${c}"/>
-          <ellipse cx="50" cy="42" rx="28" ry="26" fill="${c}"/>
-          <ellipse class="m-eye" cx="38" cy="41" rx="7.6" ry="8.2" fill="${on}"/>
-          <ellipse class="m-eye" cx="62" cy="41" rx="7.6" ry="8.2" fill="${on}"/>
-          <circle cx="40.2" cy="38.4" r="2.5" fill="${c}"/>
-          <circle cx="64.2" cy="38.4" r="2.5" fill="${c}"/>
-          <ellipse cx="25" cy="54" rx="6" ry="4" fill="${on}" opacity=".3"/>
-          <ellipse cx="75" cy="54" rx="6" ry="4" fill="${on}" opacity=".3"/>
-          <path d="M50 51l-3.4 3.3h6.8z" fill="${on}"/>
-          <path d="M43.5 57.5q3.3 3.8 6.5 0 3.2 3.8 6.5 0" stroke="${on}" stroke-width="2.2"
-                fill="none" stroke-linecap="round"/>
-          <path d="M28 47h7M28 51h6M72 47h-7M72 51h-6" stroke="${on}" stroke-width="1.4"
-                stroke-linecap="round" opacity=".4"/>
+          <path d="M24 32c-5-16-5-26-2-28 6 5 14 13 20 16z" fill="${c}"/>
+          <path d="M76 32c5-16 5-26 2-28-6 5-14 13-20 16z" fill="${c}"/>
+          <path d="M27 30c-3-11-3-18-1-19 4 4 9 9 13 11z" fill="${mix(c,on,48)}"/>
+          <path d="M73 30c3-11 3-18 1-19-4 4-9 9-13 11z" fill="${mix(c,on,48)}"/>
+          <g stroke="${c}" stroke-width="2"><path d="M27 6l-3-6 6 4M73 6l3-6-6 4"/></g>
+          <path d="${furEdge(50,42,28.5,26.5,40,.035)}" fill="${c}"/>
+          ${furStrokes(50,42,27,-Math.PI*0.9,-Math.PI*0.1,14,6,hi(.13),1.6)}
+          <g stroke="${sh(.13)}" stroke-width="2.2" stroke-linecap="round" fill="none">
+            <path d="M50 16v8M42 18l-2 7M58 18l2 7"/>
+          </g>
+          <ellipse cx="50" cy="25" rx="16" ry="7" fill="${hi(.12)}"/>
+          <path d="M23 48q5 14 15 19-12-2-17-12z" fill="${sh(.12)}"/>
+          <ellipse cx="50" cy="53" rx="17" ry="11" fill="${mix(c,on,28)}"/>
+          ${catEye(37,41,8.2,6.4,c,on,false)}
+          ${catEye(63,41,8.2,6.4,c,on,true)}
+          ${catMuzzle(50,50,1,c,on)}
+          ${whiskers(50,51,c,on)}
         </g>
       </g>
     </svg>`}
